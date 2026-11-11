@@ -19,6 +19,9 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 /** True while a custom background image is behind the content. */
 val LocalHasBackgroundImage = staticCompositionLocalOf { false }
 
+/** How opaque cards are while a background image is visible (0 = clear, 1 = solid). */
+val LocalCardOpacity = androidx.compose.runtime.compositionLocalOf { 0.3f }
+
 @Composable
 fun RabBeatBackground(
     appearance: AppearanceSettings,
@@ -29,7 +32,10 @@ fun RabBeatBackground(
     val uri = appearance.backgroundUri
     val hasImage = appearance.backgroundEnabled && !uri.isNullOrBlank()
 
-    CompositionLocalProvider(LocalHasBackgroundImage provides hasImage) {
+    CompositionLocalProvider(
+        LocalHasBackgroundImage provides hasImage,
+        LocalCardOpacity provides appearance.cardOpacity,
+    ) {
         Box(
             modifier
                 .fillMaxSize()

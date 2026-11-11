@@ -74,6 +74,7 @@ interface SettingsRepository {
     suspend fun setBackgroundEnabled(enabled: Boolean)
     suspend fun setBackgroundBlur(radiusDp: Float)
     suspend fun setBackgroundDim(dim: Float)
+    suspend fun setCardOpacity(opacity: Float)
 
     val onboardingDone: Flow<Boolean>
     suspend fun setOnboardingDone(done: Boolean)

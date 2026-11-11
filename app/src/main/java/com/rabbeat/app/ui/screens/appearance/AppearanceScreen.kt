@@ -117,6 +117,7 @@ class AppearanceViewModel @Inject constructor(
     fun setEnabled(enabled: Boolean) = viewModelScope.launch { settings.setBackgroundEnabled(enabled) }
     fun setBlur(value: Float) = viewModelScope.launch { settings.setBackgroundBlur(value) }
     fun setDim(value: Float) = viewModelScope.launch { settings.setBackgroundDim(value) }
+    fun setCardOpacity(value: Float) = viewModelScope.launch { settings.setCardOpacity(value) }
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { settings.setThemeMode(mode) }
     fun reset() = viewModelScope.launch {
         backgroundStore.clearAll()
@@ -125,6 +126,8 @@ class AppearanceViewModel @Inject constructor(
         settings.setBackgroundEnabled(true)
         settings.setBackgroundBlur(22f)
         settings.setBackgroundDim(0.55f)
+        settings.setCardOpacity(0.3f)
+        settings.setThemeMode(ThemeMode.SYSTEM)
     }
 }
 
@@ -135,6 +138,7 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
     val context = LocalContext.current
     var cropSource by remember { mutableStateOf<File?>(null) }
     var hasSource by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
     LaunchedEffect(appearance.backgroundUri) { hasSource = vm.hasSourceFile() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
@@ -248,6 +252,14 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
                     enabled = appearance.backgroundUri != null && appearance.backgroundEnabled,
                     onValueChange = vm::setDim,
                 )
+                SliderSetting(
+                    label = stringResource(R.string.appearance_card_opacity),
+                    valueLabel = "${(appearance.cardOpacity * 100).toInt()}%",
+                    value = appearance.cardOpacity,
+                    range = 0f..1f,
+                    enabled = appearance.backgroundUri != null && appearance.backgroundEnabled,
+                    onValueChange = vm::setCardOpacity,
+                )
                 Spacer(Modifier.height(6.dp))
             }
 
@@ -290,10 +302,29 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
                 GlassPill(
                     text = stringResource(R.string.appearance_reset_action),
                     icon = Icons.Filled.RestartAlt,
-                    onClick = vm::reset,
+                    onClick = { confirmReset = true },
                 )
             }
         }
+    }
+    if (confirmReset) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.appearance_reset_title)) },
+            text = { Text(stringResource(R.string.appearance_reset_body)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    confirmReset = false
+                    vm.reset()
+                    Toast.makeText(context, R.string.appearance_reset_done, Toast.LENGTH_SHORT).show()
+                }) { Text(stringResource(R.string.appearance_reset_confirm), color = Color(0xFFFF3B30)) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { confirmReset = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
     cropSource?.let { file ->
         BackgroundCropper(

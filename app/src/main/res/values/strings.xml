@@ -331,6 +331,11 @@
     <string name="appearance_theme">主题模式</string>
     <string name="appearance_reset">恢复默认</string>
     <string name="appearance_reset_action">重置所有个性化设置</string>
+    <string name="appearance_card_opacity">卡片不透明度</string>
+    <string name="appearance_reset_title">恢复默认外观？</string>
+    <string name="appearance_reset_body">背景图会被移除，强调色、模糊、压暗、卡片不透明度和主题都会恢复成默认值。这个操作不能撤销。</string>
+    <string name="appearance_reset_confirm">恢复默认</string>
+    <string name="appearance_reset_done">已恢复默认外观</string>
     <string name="accent_violet">兔耳紫</string>
     <string name="accent_amber">暖橙</string>
     <string name="accent_ocean">海蓝</string>

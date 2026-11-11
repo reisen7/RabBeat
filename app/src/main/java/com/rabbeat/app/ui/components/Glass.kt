@@ -68,8 +68,8 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 fun adaptiveSurface(color: Color, alpha: Float? = null): Color = when {
     !LocalHasBackgroundImage.current -> color
     alpha != null -> color.copy(alpha = alpha)
-    LocalRabBeatPalette.current.isDark -> Color.White.copy(alpha = 0.12f)
-    else -> Color.White.copy(alpha = 0.3f)
+    LocalRabBeatPalette.current.isDark -> Color.White.copy(alpha = LocalCardOpacity.current * 0.4f)
+    else -> Color.White.copy(alpha = LocalCardOpacity.current)
 }
 
 @Composable

@@ -10,4 +10,5 @@ data class AppearanceSettings(
     val backgroundEnabled: Boolean = true,
     val backgroundBlur: Float = 22f,
     val backgroundDim: Float = 0.55f,
+    val cardOpacity: Float = 0.3f,
 )

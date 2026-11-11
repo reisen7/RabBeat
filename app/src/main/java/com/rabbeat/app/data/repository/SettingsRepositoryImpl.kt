@@ -45,6 +45,7 @@ class SettingsRepositoryImpl @Inject constructor(
             backgroundEnabled = prefs[Keys.BACKGROUND_ENABLED] ?: true,
             backgroundBlur = (prefs[Keys.BACKGROUND_BLUR] ?: 22f).coerceIn(0f, 40f),
             backgroundDim = (prefs[Keys.BACKGROUND_DIM] ?: 0.55f).coerceIn(0f, 0.9f),
+            cardOpacity = (prefs[Keys.CARD_OPACITY] ?: 0.3f).coerceIn(0f, 1f),
         )
     }
 
@@ -68,6 +69,10 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun setBackgroundDim(dim: Float) {
         context.settingsDataStore.edit { it[Keys.BACKGROUND_DIM] = dim.coerceIn(0f, 0.9f) }
+    }
+
+    override suspend fun setCardOpacity(opacity: Float) {
+        context.settingsDataStore.edit { it[Keys.CARD_OPACITY] = opacity.coerceIn(0f, 1f) }
     }
 
     override val onboardingDone: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.ONBOARDING] ?: false }
@@ -148,6 +153,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val BACKGROUND_ENABLED = booleanPreferencesKey("background_enabled")
         val BACKGROUND_BLUR = floatPreferencesKey("background_blur")
         val BACKGROUND_DIM = floatPreferencesKey("background_dim")
+        val CARD_OPACITY = floatPreferencesKey("card_opacity")
         val ONBOARDING = booleanPreferencesKey("onboarding_done")
         val RECENT = stringPreferencesKey("recent_searches")
         val SLEEP_MINUTES = intPreferencesKey("sleep_minutes")
