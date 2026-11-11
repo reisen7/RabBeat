@@ -300,7 +300,7 @@ fun SettingsScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().background(com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.groupedBackground)) {
+    Box(Modifier.fillMaxSize().background(com.rabbeat.app.ui.components.groupedPageBackground())) {
         Column(Modifier.fillMaxSize()) {
             ScreenHeader(
                 title = stringResource(R.string.nav_settings),
@@ -488,7 +488,7 @@ private fun SettingsBody(
     Column(
         Modifier
             .fillMaxSize()
-            .background(com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.groupedBackground)
+            .background(com.rabbeat.app.ui.components.groupedPageBackground())
             .verticalScroll(rememberScrollState())
             .padding(bottom = 36.dp),
     ) {

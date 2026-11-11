@@ -118,7 +118,7 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
         if (uri != null) vm.importBackground(uri)
     }
 
-    Column(Modifier.fillMaxSize().background(LocalRabBeatPalette.current.groupedBackground)) {
+    Column(Modifier.fillMaxSize().background(com.rabbeat.app.ui.components.groupedPageBackground())) {
         ScreenHeader(
             title = stringResource(R.string.appearance_title),
             leading = {

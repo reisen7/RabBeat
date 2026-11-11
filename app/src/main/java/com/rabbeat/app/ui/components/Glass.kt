@@ -65,6 +65,10 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 fun adaptiveSurface(color: Color, alpha: Float = 0.92f): Color =
     if (LocalHasBackgroundImage.current) color.copy(alpha = alpha) else color
 
+@Composable
+fun groupedPageBackground(): Color =
+    if (LocalHasBackgroundImage.current) Color.Transparent else LocalRabBeatPalette.current.groupedBackground
+
 /** Flat surface; the default look is the iOS "elevated" material. */
 @Composable
 fun GlassSurface(
