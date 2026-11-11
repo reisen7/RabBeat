@@ -318,6 +318,11 @@
     <string name="appearance_choose">选择照片</string>
     <string name="appearance_change">更换</string>
     <string name="appearance_remove">移除背景图片</string>
+    <string name="appearance_recrop">调整位置和大小</string>
+    <string name="appearance_recrop_body">重新裁剪当前背景</string>
+    <string name="crop_open_failed">无法打开这张图片</string>
+    <string name="crop_hint">双指缩放，拖动调整位置</string>
+    <string name="crop_reset">重置</string>
     <string name="appearance_enable">显示自定义背景</string>
     <string name="appearance_enable_body">关闭后只显示纯色背景</string>
     <string name="appearance_blur">背景模糊</string>

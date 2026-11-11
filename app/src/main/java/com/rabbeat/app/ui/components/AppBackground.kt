@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -43,13 +42,9 @@ fun RabBeatBackground(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.18f
-                            scaleY = 1.18f
-                        }
                         .blur(
                             radius = appearance.backgroundBlur.dp,
-                            edgeTreatment = BlurredEdgeTreatment.Unbounded,
+                            edgeTreatment = BlurredEdgeTreatment.Rectangle,
                         ),
                 )
                 Box(

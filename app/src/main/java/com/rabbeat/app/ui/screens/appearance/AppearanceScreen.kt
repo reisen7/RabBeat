@@ -1,6 +1,8 @@
 package com.rabbeat.app.ui.screens.appearance
 
+import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -33,11 +36,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,6 +74,7 @@ import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.ui.theme.palette
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -86,14 +95,23 @@ class AppearanceViewModel @Inject constructor(
     val theme = settings.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeMode.SYSTEM)
 
     fun setAccent(accent: AccentTheme) = viewModelScope.launch { settings.setAccentTheme(accent) }
-    fun importBackground(uri: Uri) = viewModelScope.launch {
-        val saved = withContext(Dispatchers.IO) { backgroundStore.import(uri) } ?: return@launch
+    fun stageBackground(uri: Uri, onReady: (File?) -> Unit) = viewModelScope.launch {
+        onReady(withContext(Dispatchers.IO) { backgroundStore.importSource(uri) })
+    }
+    fun applyCropped(bitmap: Bitmap) = viewModelScope.launch {
+        val saved = withContext(Dispatchers.IO) { backgroundStore.saveCropped(bitmap) } ?: return@launch
+        withContext(Dispatchers.IO) { backgroundStore.promotePending() }
         backgroundStore.release(appearance.value.backgroundUri)
         settings.setBackgroundUri(saved)
         settings.setBackgroundEnabled(true)
     }
+    fun discardPending() = viewModelScope.launch {
+        withContext(Dispatchers.IO) { backgroundStore.discardPending() }
+    }
+    fun sourceFile(): File? = backgroundStore.sourceFile()
+    suspend fun hasSourceFile(): Boolean = withContext(Dispatchers.IO) { backgroundStore.sourceFile() != null }
     fun removeBackground() = viewModelScope.launch {
-        backgroundStore.release(appearance.value.backgroundUri)
+        backgroundStore.clearAll()
         settings.setBackgroundUri(null)
     }
     fun setEnabled(enabled: Boolean) = viewModelScope.launch { settings.setBackgroundEnabled(enabled) }
@@ -101,7 +119,7 @@ class AppearanceViewModel @Inject constructor(
     fun setDim(value: Float) = viewModelScope.launch { settings.setBackgroundDim(value) }
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { settings.setThemeMode(mode) }
     fun reset() = viewModelScope.launch {
-        backgroundStore.release(appearance.value.backgroundUri)
+        backgroundStore.clearAll()
         settings.setAccentTheme(AccentTheme.ROSE)
         settings.setBackgroundUri(null)
         settings.setBackgroundEnabled(true)
@@ -114,8 +132,20 @@ class AppearanceViewModel @Inject constructor(
 fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel()) {
     val appearance by vm.appearance.collectAsStateWithLifecycle()
     val theme by vm.theme.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var cropSource by remember { mutableStateOf<File?>(null) }
+    var hasSource by remember { mutableStateOf(false) }
+    LaunchedEffect(appearance.backgroundUri) { hasSource = vm.hasSourceFile() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) vm.importBackground(uri)
+        if (uri != null) {
+            vm.stageBackground(uri) { file ->
+                if (file != null) {
+                    cropSource = file
+                } else {
+                    Toast.makeText(context, R.string.crop_open_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     Column(Modifier.fillMaxSize().background(com.rabbeat.app.ui.components.groupedPageBackground())) {
@@ -183,6 +213,16 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
                         enabled = appearance.backgroundUri != null,
                         onCheckedChange = vm::setEnabled,
                         colors = IosSwitchColors(),
+                    )
+                }
+                if (appearance.backgroundUri != null && hasSource) {
+                    GroupDivider()
+                    SettingRow(
+                        icon = Icons.Filled.Crop,
+                        iconColor = Color(0xFF34C759),
+                        title = stringResource(R.string.appearance_recrop),
+                        subtitle = stringResource(R.string.appearance_recrop_body),
+                        onClick = { vm.sourceFile()?.let { cropSource = it } },
                     )
                 }
                 if (appearance.backgroundUri != null) {
@@ -254,6 +294,19 @@ fun AppearanceScreen(onBack: () -> Unit, vm: AppearanceViewModel = hiltViewModel
                 )
             }
         }
+    }
+    cropSource?.let { file ->
+        BackgroundCropper(
+            source = file,
+            onDone = { bitmap ->
+                vm.applyCropped(bitmap)
+                cropSource = null
+            },
+            onDismiss = {
+                vm.discardPending()
+                cropSource = null
+            },
+        )
     }
 }
 
