@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号，例如 0.1.0 或 0.2.0-beta.1（会创建 tag v<版本号>）"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -30,18 +36,30 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Resolve version from tag
+      - name: Resolve version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          name="${tag#v}"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            name="${INPUT_VERSION#v}"
+            tag="v$name"
+          else
+            tag="${GITHUB_REF_NAME}"
+            name="${tag#v}"
+          fi
           if [[ ! "$name" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Tag '$tag' must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] && git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+            echo "::error::Tag $tag already exists; pick a new version."
             exit 1
           fi
           code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
           prerelease=false
           [[ -n "${BASH_REMATCH[4]}" ]] && prerelease=true
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
@@ -94,6 +112,8 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: RabBeat ${{ steps.version.outputs.name }}
           prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
