@@ -67,6 +67,7 @@ class NeteasePlaylistImporter @Inject constructor(
         var matched = 0
         var skipped = 0
         val now = System.currentTimeMillis()
+        var finalName = detail.name
 
         database.withTransaction {
             val trackDao = database.trackDao()
@@ -127,10 +128,12 @@ class NeteasePlaylistImporter @Inject constructor(
             val playlistDao = database.playlistDao()
             val playlistTableId = "ne_pl_$playlistId"
             val old = playlistDao.get(playlistTableId)
+            val taken = playlistDao.getAll().filter { it.id != playlistTableId }.map { it.name }.toSet()
+            finalName = old?.name ?: uniquePlaylistName(detail.name.ifBlank { "网易云歌单" }, taken)
             playlistDao.upsert(
                 PlaylistEntity(
                     id = playlistTableId,
-                    name = detail.name.ifBlank { "网易云歌单" },
+                    name = finalName,
                     isSystem = false,
                     createdAt = old?.createdAt ?: now,
                     updatedAt = now,
@@ -145,8 +148,14 @@ class NeteasePlaylistImporter @Inject constructor(
             )
         }
         reconciler.reconcile()
-        NeteaseImportResult(detail.name, imported, matched, skipped)
+        NeteaseImportResult(finalName, imported, matched, skipped)
     }
+}
+
+internal fun uniquePlaylistName(base: String, taken: Set<String>): String {
+    if (base !in taken) return base
+    if ("$base new" !in taken) return "$base new"
+    return generateSequence(2) { it + 1 }.map { "$base new$it" }.first { it !in taken }
 }
 
 internal suspend fun rebuildNeteaseCatalog(database: RabBeatDatabase) {
