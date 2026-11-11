@@ -279,7 +279,7 @@
     <string name="lyrics_link">关联其他歌的歌词</string>
     <string name="lyrics_unlink">取消歌词关联</string>
     <string name="lyrics_linked">正在使用关联歌词</string>
-    <string name="lyrics_size">字号</string>
+    <string name="lyrics_size">歌词字号</string>
     <string name="lyrics_pick">选择要借用歌词的歌</string>
     <string name="history_clear">清空播放记录</string>
     <string name="history_cleared">播放记录已清空</string>

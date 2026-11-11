@@ -274,7 +274,6 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                         activeLine = activeLine,
                         scale = lyricScale,
                         listState = lyricState,
-                        onScale = { lyricScale = if (lyricScale >= 1.4f) 1f else lyricScale + 0.2f },
                         onSeek = { vm.player.seekTo(it) },
                         modifier = Modifier.weight(1f).padding(top = 10.dp),
                     )
@@ -381,6 +380,10 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.lyrics_link)) },
                                 onClick = { moreMenu = false; linkOpen = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.lyrics_size)) },
+                                onClick = { moreMenu = false; lyricScale = if (lyricScale >= 1.4f) 1f else lyricScale + 0.2f },
                             )
                             if (sheet.linked) {
                                 DropdownMenuItem(
@@ -618,23 +621,16 @@ private fun LyricsView(
     activeLine: Int,
     scale: Float,
     listState: androidx.compose.foundation.lazy.LazyListState,
-    onScale: () -> Unit,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (sheet.linked) {
-                Text(
-                    stringResource(R.string.lyrics_linked),
-                    color = Color.White.copy(alpha = 0.55f),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            PlayerPill(text = stringResource(R.string.lyrics_size), onClick = onScale)
+        if (sheet.linked) {
+            Text(
+                stringResource(R.string.lyrics_linked),
+                color = Color.White.copy(alpha = 0.55f),
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
         when {
             !ready -> {
@@ -722,20 +718,6 @@ private fun SpeedDialog(current: Float, onPick: (Float) -> Unit, onDismiss: () -
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
-    )
-}
-
-@Composable
-private fun PlayerPill(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = Color.White.copy(alpha = 0.9f),
-        modifier = modifier
-            .clip(androidx.compose.foundation.shape.CircleShape)
-            .background(Color.White.copy(alpha = 0.15f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 8.dp),
     )
 }
 
