@@ -56,7 +56,7 @@ class LibraryBackup @Inject constructor(
         playlistDao.deleteAll()
         val now = System.currentTimeMillis()
         var missing = 0
-        file.playlists.forEach { playlist ->
+        file.playlists.forEachIndexed { index, playlist ->
             val id = java.util.UUID.randomUUID().toString()
             playlistDao.upsert(
                 PlaylistEntity(
@@ -65,6 +65,7 @@ class LibraryBackup @Inject constructor(
                     isSystem = false,
                     createdAt = now,
                     updatedAt = now,
+                    sortOrder = index,
                 ),
             )
             val kept = playlist.trackIds.filter { idIn ->

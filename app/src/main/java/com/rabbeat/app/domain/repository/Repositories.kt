@@ -104,6 +104,8 @@ interface PlaylistRepository {
     suspend fun create(name: String): String
     suspend fun rename(id: String, name: String)
     suspend fun delete(id: String)
+    suspend fun deleteMany(ids: List<String>)
+    suspend fun reorder(orderedIds: List<String>)
     suspend fun addTracks(playlistId: String, trackIds: List<String>, atStart: Boolean = false)
     suspend fun removeTrack(playlistId: String, trackId: String)
     suspend fun saveQueue(name: String, trackIds: List<String>)

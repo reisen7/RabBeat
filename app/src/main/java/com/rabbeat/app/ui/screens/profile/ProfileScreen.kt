@@ -20,21 +20,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +57,7 @@ import com.rabbeat.app.domain.repository.PlaylistRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
 import com.rabbeat.app.playback.PlayerController
 import com.rabbeat.app.ui.components.Artwork
+import com.rabbeat.app.ui.components.CreatePlaylistDialog
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.FailedState
 import com.rabbeat.app.ui.components.GroupDivider
@@ -70,6 +65,7 @@ import com.rabbeat.app.ui.components.HeaderIconButton
 import com.rabbeat.app.ui.components.LoadingState
 import com.rabbeat.app.ui.components.ScreenHeader
 import com.rabbeat.app.ui.components.ScreenState
+import com.rabbeat.app.ui.components.PlaylistCover
 import com.rabbeat.app.ui.components.SectionHeader
 import com.rabbeat.app.ui.components.SettingRow
 import com.rabbeat.app.ui.components.TrackRow
@@ -162,13 +158,13 @@ class ProfileViewModel @Inject constructor(
 fun ProfileScreen(
     onMenu: () -> Unit,
     onPlaylist: (String) -> Unit,
+    onPlaylists: () -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
     vm: ProfileViewModel = hiltViewModel(),
 ) {
     val state by vm.page.collectAsStateWithLifecycle()
     var creating by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
 
     when (val current = state) {
         ScreenState.Loading -> LoadingState(Modifier.fillMaxSize())
@@ -178,6 +174,7 @@ fun ProfileScreen(
             page = current.value,
             onMenu = onMenu,
             onPlaylist = onPlaylist,
+            onPlaylists = onPlaylists,
             onHistory = onHistory,
             onSettings = onSettings,
             onCreate = { creating = true },
@@ -190,28 +187,9 @@ fun ProfileScreen(
     }
 
     if (creating) {
-        AlertDialog(
-            onDismissRequest = { creating = false },
-            title = { Text(stringResource(R.string.playlist_new)) },
-            text = {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(40) },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.playlist_name)) },
-                    shape = RoundedCornerShape(16.dp),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.createPlaylist(name) { id -> onPlaylist(id) }
-                    name = ""
-                    creating = false
-                }) { Text(stringResource(R.string.action_ok)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { creating = false }) { Text(stringResource(R.string.action_cancel)) }
-            },
+        CreatePlaylistDialog(
+            onDismiss = { creating = false },
+            onConfirm = { name -> vm.createPlaylist(name) { id -> onPlaylist(id) } },
         )
     }
 }
@@ -221,6 +199,7 @@ private fun ProfileBody(
     page: ProfilePage,
     onMenu: () -> Unit,
     onPlaylist: (String) -> Unit,
+    onPlaylists: () -> Unit,
     onHistory: () -> Unit,
     onSettings: () -> Unit,
     onCreate: () -> Unit,
@@ -256,8 +235,8 @@ private fun ProfileBody(
         item {
             SectionHeader(
                 title = stringResource(R.string.profile_section_playlists),
-                actionLabel = stringResource(R.string.profile_playlist_new),
-                onAction = onCreate,
+                actionLabel = stringResource(R.string.profile_manage_playlists),
+                onAction = onPlaylists,
             )
         }
         item {
@@ -432,49 +411,13 @@ private fun NewPlaylistCard(onClick: () -> Unit) {
 
 @Composable
 private fun PlaylistCard(playlist: UserPlaylist, onClick: () -> Unit) {
-    val accent = LocalAccentPalette.current
     Column(
         Modifier
             .width(150.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
     ) {
-        Box(
-            Modifier
-                .size(150.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(
-                    Brush.linearGradient(
-                        if (playlist.isSystem) {
-                            listOf(Color(0xFFFF5E8A), Color(0xFFD4237A))
-                        } else {
-                            listOf(accent.color.copy(alpha = 0.62f), accent.color.copy(alpha = 0.28f))
-                        },
-                    ),
-                ),
-        ) {
-            if (playlist.isSystem) {
-                Icon(
-                    Icons.Filled.Favorite,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.align(Alignment.Center).size(52.dp),
-                )
-            } else {
-                Text(
-                    playlist.name.take(1),
-                    style = MaterialTheme.typography.displaySmall,
-                    color = Color.White.copy(alpha = 0.92f),
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.PlaylistPlay,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.align(Alignment.BottomStart).padding(12.dp).size(20.dp),
-                )
-            }
-        }
+        PlaylistCover(playlist, 150.dp)
         Spacer(Modifier.height(8.dp))
         Text(
             playlist.name,

@@ -246,6 +246,15 @@
     <string name="playlist_rename">改名</string>
     <string name="playlist_delete">删除歌单</string>
     <string name="playlist_delete_body">歌单会被删掉，歌曲文件还在。</string>
+    <string name="playlists_count">%1$d 个歌单</string>
+    <string name="playlists_delete_count">删除（%1$d）</string>
+    <string name="playlists_delete_title">删除 %1$d 个歌单？</string>
+    <string name="action_edit">编辑</string>
+    <string name="action_done">完成</string>
+    <string name="action_select_all">全选</string>
+    <string name="action_deselect_all">取消全选</string>
+    <string name="action_delete">删除</string>
+    <string name="cd_reorder">拖动排序</string>
     <string name="playlist_missing">歌单不在了</string>
     <string name="playlist_search">在歌单里找</string>
     <string name="playlist_no_tracks">歌单里还没有歌</string>
@@ -333,6 +342,7 @@
     <string name="profile_stat_playlists">歌单</string>
     <string name="profile_section_playlists">我的歌单</string>
     <string name="profile_playlist_new">新建歌单</string>
+    <string name="profile_manage_playlists">管理歌单</string>
     <string name="profile_playlist_hint">点歌单封面进入，右上角可以新建</string>
     <string name="profile_playlist_hint_short">给喜欢的歌一个位置</string>
     <string name="profile_section_stats">播放数据</string>

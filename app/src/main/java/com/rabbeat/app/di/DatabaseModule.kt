@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.rabbeat.app.data.local.MIGRATION_1_2
 import com.rabbeat.app.data.local.MIGRATION_2_3
 import com.rabbeat.app.data.local.MIGRATION_3_4
+import com.rabbeat.app.data.local.MIGRATION_4_5
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.dao.LyricLinkDao
 import com.rabbeat.app.data.local.dao.PlayHistoryDao
@@ -28,7 +29,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): RabBeatDatabase =
         Room.databaseBuilder(context, RabBeatDatabase::class.java, "rabbeat.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .fallbackToDestructiveMigration(true)
             .build()
 

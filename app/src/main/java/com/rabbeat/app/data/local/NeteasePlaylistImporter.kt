@@ -134,6 +134,7 @@ class NeteasePlaylistImporter @Inject constructor(
                     isSystem = false,
                     createdAt = old?.createdAt ?: now,
                     updatedAt = now,
+                    sortOrder = old?.sortOrder ?: ((playlistDao.minSortOrder() ?: 0) - 1),
                 ),
             )
             playlistDao.deleteTracks(playlistTableId)

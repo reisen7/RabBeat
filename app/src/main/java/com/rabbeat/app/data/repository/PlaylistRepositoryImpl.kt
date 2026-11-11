@@ -1,6 +1,8 @@
 package com.rabbeat.app.data.repository
 
+import androidx.room.withTransaction
 import com.rabbeat.app.data.local.LikedPlaylist
+import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.dao.PlaylistDao
 import com.rabbeat.app.data.local.dao.SourceDao
 import com.rabbeat.app.data.local.dao.TrackDao
@@ -22,6 +24,7 @@ class PlaylistRepositoryImpl @Inject constructor(
     private val trackDao: TrackDao,
     private val sourceDao: SourceDao,
     private val likedPlaylist: LikedPlaylist,
+    private val database: RabBeatDatabase,
 ) : PlaylistRepository {
     override fun observePlaylists(): Flow<List<UserPlaylist>> =
         combine(playlistDao.observeAll(), playlistDao.observeAllRefs()) { rows, refs ->
@@ -57,6 +60,7 @@ class PlaylistRepositoryImpl @Inject constructor(
                 isSystem = false,
                 createdAt = now,
                 updatedAt = now,
+                sortOrder = (playlistDao.minSortOrder() ?: 0) - 1,
             ),
         )
         return id
@@ -73,6 +77,24 @@ class PlaylistRepositoryImpl @Inject constructor(
         if (playlistDao.get(id)?.isSystem == true) return
         playlistDao.deleteTracks(id)
         playlistDao.delete(id)
+    }
+
+    override suspend fun deleteMany(ids: List<String>) {
+        database.withTransaction {
+            ids.forEach { id ->
+                if (playlistDao.get(id)?.isSystem == true) return@forEach
+                playlistDao.deleteTracks(id)
+                playlistDao.delete(id)
+            }
+        }
+    }
+
+    override suspend fun reorder(orderedIds: List<String>) {
+        database.withTransaction {
+            orderedIds.forEachIndexed { index, id ->
+                playlistDao.setSortOrder(id, index)
+            }
+        }
     }
 
     override suspend fun addTracks(playlistId: String, trackIds: List<String>, atStart: Boolean) {

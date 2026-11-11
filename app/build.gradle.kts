@@ -75,6 +75,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.room.paging)
     implementation(libs.androidx.paging.compose)
+    implementation(libs.calvin.reorderable)
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.media3.exoplayer)

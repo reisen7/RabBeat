@@ -23,6 +23,18 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `playlists` ADD COLUMN `sortOrder` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+            "UPDATE playlists SET sortOrder = (" +
+                "SELECT COUNT(*) FROM playlists p2 " +
+                "WHERE p2.updatedAt > playlists.updatedAt " +
+                "OR (p2.updatedAt = playlists.updatedAt AND p2.id < playlists.id))",
+        )
+    }
+}
+
 val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(

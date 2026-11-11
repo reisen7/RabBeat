@@ -1,5 +1,6 @@
 package com.rabbeat.app.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -32,6 +33,7 @@ data class PlaylistEntity(
     val isSystem: Boolean,
     val createdAt: Long,
     val updatedAt: Long,
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
 )
 
 @Entity(tableName = "playlist_tracks", primaryKeys = ["playlistId", "trackId"])

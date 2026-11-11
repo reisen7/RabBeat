@@ -99,10 +99,10 @@ interface SourceDao {
 
 @Dao
 interface PlaylistDao {
-    @Query("SELECT * FROM playlists ORDER BY isSystem DESC, updatedAt DESC")
+    @Query("SELECT * FROM playlists ORDER BY isSystem DESC, sortOrder ASC, updatedAt DESC")
     fun observeAll(): Flow<List<PlaylistEntity>>
 
-    @Query("SELECT * FROM playlists ORDER BY isSystem DESC, updatedAt DESC")
+    @Query("SELECT * FROM playlists ORDER BY isSystem DESC, sortOrder ASC, updatedAt DESC")
     suspend fun getAll(): List<PlaylistEntity>
 
     @Query("SELECT * FROM playlists WHERE id = :id")
@@ -131,6 +131,12 @@ interface PlaylistDao {
 
     @Query("UPDATE playlists SET updatedAt = :updatedAt WHERE id = :id")
     suspend fun touch(id: String, updatedAt: Long)
+
+    @Query("SELECT MIN(sortOrder) FROM playlists WHERE isSystem = 0")
+    suspend fun minSortOrder(): Int?
+
+    @Query("UPDATE playlists SET sortOrder = :order WHERE id = :id AND isSystem = 0")
+    suspend fun setSortOrder(id: String, order: Int)
 
     @Query("UPDATE playlist_tracks SET position = position + :delta WHERE playlistId = :playlistId")
     suspend fun shift(playlistId: String, delta: Int)

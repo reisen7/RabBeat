@@ -60,6 +60,7 @@ import com.rabbeat.app.ui.screens.library.LibraryScreen
 import com.rabbeat.app.ui.screens.onboarding.OnboardingScreen
 import com.rabbeat.app.ui.screens.player.PlayerScreen
 import com.rabbeat.app.ui.screens.playlist.PlaylistDetailScreen
+import com.rabbeat.app.ui.screens.playlist.PlaylistsScreen
 import com.rabbeat.app.ui.screens.profile.ProfileScreen
 import com.rabbeat.app.ui.screens.queue.QueueScreen
 import com.rabbeat.app.ui.screens.search.SearchScreen
@@ -89,6 +90,7 @@ sealed interface Route {
     @Serializable data class AlbumDetail(val albumId: String) : Route
     @Serializable data class ArtistDetail(val artistId: String) : Route
     @Serializable data class SourceDetail(val sourceId: String) : Route
+    @Serializable data object Playlists : Route
     @Serializable data class PlaylistDetail(val playlistId: String) : Route
 }
 
@@ -266,8 +268,15 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                     ProfileScreen(
                         onMenu = { scope.launch { drawerState.open() } },
                         onPlaylist = { navController.navigate(Route.PlaylistDetail(it)) },
+                        onPlaylists = { navController.navigate(Route.Playlists) },
                         onHistory = { navController.navigate(Route.History) },
                         onSettings = { navController.navigate(Route.Settings) },
+                    )
+                }
+                composable<Route.Playlists> {
+                    PlaylistsScreen(
+                        onBack = { navController.popBackStack() },
+                        onPlaylist = { navController.navigate(Route.PlaylistDetail(it)) },
                     )
                 }
                 composable<Route.Settings> {
