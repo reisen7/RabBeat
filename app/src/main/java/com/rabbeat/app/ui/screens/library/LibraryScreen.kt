@@ -35,13 +35,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
@@ -87,6 +85,7 @@ import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.FailedState
 import com.rabbeat.app.ui.components.GlassPill
 import com.rabbeat.app.ui.components.HeaderIconButton
+import com.rabbeat.app.ui.components.LocateButton
 import com.rabbeat.app.ui.components.LoadingState
 import com.rabbeat.app.ui.components.TrackRowPlaceholder
 import com.rabbeat.app.ui.components.PillTabRow
@@ -381,17 +380,12 @@ private fun LibraryBody(
                             }
                         }
                         if (bundle.currentTrackId != null) {
-                            FloatingActionButton(
+                            LocateButton(
                                 onClick = {
                                     vm.locateCurrent { index -> scope.launch { listState.scrollToItem(index) } }
                                 },
-                                modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
-                                containerColor = accent.color,
-                                contentColor = accent.onColor,
-                                shape = CircleShape,
-                            ) {
-                                Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.playlist_locate))
-                            }
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                            )
                         }
                     }
                 }

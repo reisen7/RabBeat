@@ -34,14 +34,12 @@ import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
@@ -85,6 +83,7 @@ import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.GlassPill
 import com.rabbeat.app.ui.components.HeaderIconButton
+import com.rabbeat.app.ui.components.LocateButton
 import com.rabbeat.app.ui.components.ScreenHeader
 import com.rabbeat.app.ui.components.SelectionCheck
 import com.rabbeat.app.ui.components.TrackRow
@@ -449,15 +448,10 @@ fun PlaylistDetailScreen(
                 }
                 val index = shown.indexOfFirst { it.id == page.currentTrackId }
                 if (index >= 0 && !selecting) {
-                    FloatingActionButton(
+                    LocateButton(
                         onClick = { scope.launch { listState.animateScrollToItem(index) } },
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
-                        containerColor = accent.color,
-                        contentColor = accent.onColor,
-                        shape = CircleShape,
-                    ) {
-                        Icon(Icons.Filled.MyLocation, contentDescription = stringResource(R.string.playlist_locate))
-                    }
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    )
                 }
             }
         }
