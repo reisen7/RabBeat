@@ -1,5 +1,6 @@
 package com.rabbeat.app.ui.screens.playlist
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +46,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,6 +75,9 @@ import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import android.widget.Toast
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -88,6 +99,9 @@ class PlaylistDetailViewModel @Inject constructor(
     fun enqueue(track: Track) = player.enqueue(track)
     fun remove(playlistId: String, trackId: String) {
         viewModelScope.launch { playlists.removeTrack(playlistId, trackId) }
+    }
+    fun reorder(playlistId: String, trackIds: List<String>) {
+        viewModelScope.launch { playlists.reorderTracks(playlistId, trackIds) }
     }
     fun rename(playlistId: String, name: String) {
         viewModelScope.launch { playlists.rename(playlistId, name) }
@@ -119,6 +133,11 @@ fun PlaylistDetailScreen(
     val scope = rememberCoroutineScope()
     val accent = LocalAccentPalette.current
     val palette = LocalRabBeatPalette.current
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    var local by remember { mutableStateOf<List<Track>?>(null) }
+    var dragging by remember { mutableStateOf(false) }
+    val canDrag = sort == PlaylistSort.Order && query.isBlank()
     val shown = page.tracks
         .let { tracks ->
             val q = query.trim()
@@ -134,6 +153,13 @@ fun PlaylistDetailScreen(
                 PlaylistSort.Album -> tracks.sortedBy { it.album.lowercase() }
             }
         }
+    val display = local ?: shown
+    LaunchedEffect(page.tracks) { if (!dragging) local = null }
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        val list = (local ?: shown).toMutableList()
+        list.add(to.index.coerceAtMost(list.size), list.removeAt(from.index))
+        local = list
+    }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
@@ -237,18 +263,54 @@ fun PlaylistDetailScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 6.dp, bottom = 90.dp),
                 ) {
-                    items(shown, key = { it.id }) { track ->
-                        TrackRow(
-                            track = track,
-                            onClick = { vm.play(shown, shown.indexOfFirst { it.id == track.id }) },
-                            onPlayNext = { vm.playNext(track) },
-                            onEnqueue = { vm.enqueue(track) },
-                            onFavorite = {},
-                            onDownload = {},
-                            onAddToPlaylist = { addTrackId = track.id },
-                            onRemove = { vm.remove(playlistId, track.id) },
-                            playing = track.id == page.currentTrackId,
-                        )
+                    items(display, key = { it.id }) { track ->
+                        ReorderableItem(reorderState, key = track.id) { isDragging ->
+                            val scale by animateFloatAsState(if (isDragging) 1.02f else 1f)
+                            val elevation by animateFloatAsState(if (isDragging) 8f else 0f)
+                            TrackRow(
+                                track = track,
+                                onClick = { vm.play(shown, shown.indexOfFirst { it.id == track.id }) },
+                                onPlayNext = { vm.playNext(track) },
+                                onEnqueue = { vm.enqueue(track) },
+                                onFavorite = {},
+                                onDownload = {},
+                                onAddToPlaylist = { addTrackId = track.id },
+                                onRemove = { vm.remove(playlistId, track.id) },
+                                playing = track.id == page.currentTrackId,
+                                onLongClick = if (canDrag) {
+                                    null
+                                } else {
+                                    {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.playlist_drag_hint,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .animateItem()
+                                    .scale(scale)
+                                    .shadow(elevation.dp)
+                                    .background(if (isDragging) palette.background else Color.Transparent)
+                                    .then(
+                                        if (canDrag) {
+                                            Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    dragging = true
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onDragStopped = {
+                                                    dragging = false
+                                                    local?.let { vm.reorder(playlistId, it.map(Track::id)) }
+                                                },
+                                            )
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                            )
+                        }
                     }
                 }
                 val index = shown.indexOfFirst { it.id == page.currentTrackId }

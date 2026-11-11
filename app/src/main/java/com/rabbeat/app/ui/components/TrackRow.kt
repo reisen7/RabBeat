@@ -2,6 +2,7 @@ package com.rabbeat.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -84,6 +85,7 @@ fun TrackRow(
     onAddToPlaylist: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
     playing: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
 ) {
     var menu by remember(track.id) { mutableStateOf(false) }
     val accent = LocalAccentPalette.current
@@ -93,7 +95,13 @@ fun TrackRow(
         Row(
             Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onClick)
+                .then(
+                    if (onLongClick != null) {
+                        Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                    } else {
+                        Modifier.clickable(onClick = onClick)
+                    },
+                )
                 .padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

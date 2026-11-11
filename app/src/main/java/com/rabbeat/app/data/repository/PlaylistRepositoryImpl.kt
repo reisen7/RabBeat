@@ -3,6 +3,7 @@ package com.rabbeat.app.data.repository
 import androidx.room.withTransaction
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
+import com.rabbeat.app.data.local.reorderedPositions
 import com.rabbeat.app.data.local.dao.PlaylistDao
 import com.rabbeat.app.data.local.dao.SourceDao
 import com.rabbeat.app.data.local.dao.TrackDao
@@ -120,6 +121,16 @@ class PlaylistRepositoryImpl @Inject constructor(
         }
         playlistDao.touch(playlistId, now)
         if (playlistId == LikedPlaylist.ID) likedPlaylist.onAdded(fresh)
+    }
+
+    override suspend fun reorderTracks(playlistId: String, orderedTrackIds: List<String>) {
+        database.withTransaction {
+            val existing = playlistDao.refs(playlistId).map { it.trackId }
+            reorderedPositions(existing, orderedTrackIds).forEachIndexed { index, trackId ->
+                playlistDao.setTrackPosition(playlistId, trackId, index)
+            }
+            playlistDao.touch(playlistId, System.currentTimeMillis())
+        }
     }
 
     override suspend fun removeTrack(playlistId: String, trackId: String) {

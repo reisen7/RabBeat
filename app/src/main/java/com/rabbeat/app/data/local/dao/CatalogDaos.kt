@@ -141,6 +141,9 @@ interface PlaylistDao {
     @Query("UPDATE playlist_tracks SET position = position + :delta WHERE playlistId = :playlistId")
     suspend fun shift(playlistId: String, delta: Int)
 
+    @Query("UPDATE playlist_tracks SET position = :position WHERE playlistId = :playlistId AND trackId = :trackId")
+    suspend fun setTrackPosition(playlistId: String, trackId: String, position: Int)
+
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrack(playlistId: String, trackId: String)
 
