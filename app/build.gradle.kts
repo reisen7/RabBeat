@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -5,6 +7,17 @@ plugins {
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+fun signingValue(env: String, key: String): String? =
+    providers.environmentVariable(env).orNull?.takeIf { it.isNotBlank() }
+        ?: keystoreProperties.getProperty(key)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("RABBEAT_KEYSTORE_FILE", "storeFile")?.let { rootProject.file(it) }
 
 android {
     namespace = "com.rabbeat.app"
@@ -18,12 +31,24 @@ android {
         applicationId = "com.rabbeat.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: 1
+        versionName = providers.gradleProperty("versionName").orNull ?: "0.1.0"
+    }
+
+    signingConfigs {
+        if (releaseStoreFile?.exists() == true) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = signingValue("RABBEAT_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("RABBEAT_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("RABBEAT_KEY_PASSWORD", "keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

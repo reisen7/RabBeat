@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          name="${tag#v}"
+          if [[ ! "$name" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$tag' must look like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          prerelease=false
+          [[ -n "${BASH_REMATCH[4]}" ]] && prerelease=true
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RABBEAT_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RABBEAT_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RABBEAT_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RABBEAT_KEY_PASSWORD }}
+        run: |
+          missing=()
+          [[ -z "$KEYSTORE_BASE64" ]] && missing+=(RABBEAT_KEYSTORE_BASE64)
+          [[ -z "$KEYSTORE_PASSWORD" ]] && missing+=(RABBEAT_KEYSTORE_PASSWORD)
+          [[ -z "$KEY_ALIAS" ]] && missing+=(RABBEAT_KEY_ALIAS)
+          [[ -z "$KEY_PASSWORD" ]] && missing+=(RABBEAT_KEY_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing repository secrets: ${missing[*]}"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "RABBEAT_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        env:
+          RABBEAT_KEYSTORE_PASSWORD: ${{ secrets.RABBEAT_KEYSTORE_PASSWORD }}
+          RABBEAT_KEY_ALIAS: ${{ secrets.RABBEAT_KEY_ALIAS }}
+          RABBEAT_KEY_PASSWORD: ${{ secrets.RABBEAT_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
+            -PversionName="${{ steps.version.outputs.name }}" \
+            -PversionCode="${{ steps.version.outputs.code }}"
+
+      - name: Collect artifacts
+        id: artifacts
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Signed APK not found; check the signing secrets."
+            ls -R app/build/outputs/apk || true
+            exit 1
+          fi
+          mkdir -p dist
+          out="dist/RabBeat-${{ steps.version.outputs.name }}.apk"
+          cp "$apk" "$out"
+          (cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256")
+          echo "apk=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: RabBeat ${{ steps.version.outputs.name }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.artifacts.outputs.apk }}
+            ${{ steps.artifacts.outputs.apk }}.sha256
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
