@@ -46,6 +46,9 @@ class MockMusicRepository @Inject constructor(
     override suspend fun toggleFavorite(id: String) = room.toggleFavorite(id)
     override suspend fun recordPlayback(id: String, positionMs: Long) = room.recordPlayback(id, positionMs)
     override suspend fun updateDuration(id: String, durationMs: Long) = room.updateDuration(id, durationMs)
+    override suspend fun hide(ids: List<String>) = room.hide(ids)
+    override suspend fun unhide(ids: List<String>) = room.unhide(ids)
+    override fun observeHiddenCount(): Flow<Int> = room.observeHiddenCount()
     override fun observePlayHistory(): Flow<List<PlayRecord>> = paced(room.observePlayHistory())
     override suspend fun clearPlayHistory() = room.clearPlayHistory()
 }

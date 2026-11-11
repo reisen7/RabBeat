@@ -117,7 +117,7 @@ class FolderLibraryImporter @Inject constructor(
                     if (winner in plan.keptIds) {
                         losersByWinner.getOrPut(winner) { mutableListOf() } += entity
                     } else {
-                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt)
+                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt, entity.hidden)
                     }
                 }
             }
@@ -147,6 +147,7 @@ class FolderLibraryImporter @Inject constructor(
                     playCount = maxOf(preserved?.playCount ?: 0, losers.maxOfOrNull { it.playCount } ?: 0),
                     lastPlayedAt = listOfNotNull(preserved?.lastPlayedAt, losers.mapNotNull { it.lastPlayedAt }.maxOrNull()).maxOrNull(),
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.entity.addedAt,
+                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden },
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }

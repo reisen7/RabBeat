@@ -27,12 +27,19 @@ class TrackQuerySqlTest {
     @Test
     fun defaultIsTitleSort() {
         val q = TrackQuerySql.select(TrackQuery())
-        assertEquals("SELECT * FROM tracks ORDER BY title COLLATE NOCASE, id", q.text())
+        assertEquals("SELECT * FROM tracks WHERE hidden = 0 ORDER BY title COLLATE NOCASE, id", q.text())
+    }
+
+    @Test
+    fun hiddenOnlyFlipsClause() {
+        val q = TrackQuerySql.select(TrackQuery(hiddenOnly = true))
+        assertEquals("SELECT * FROM tracks WHERE hidden = 1 ORDER BY title COLLATE NOCASE, id", q.text())
     }
 
     @Test
     fun sourceAndOfflineFilter() {
         val q = TrackQuerySql.select(TrackQuery(sourceId = "src_device", offlineOnly = true))
+        assertTrue(q.text().contains("hidden = 0"))
         assertTrue(q.text().contains("sourceId = ?"))
         assertTrue(q.text().contains("(origin != 'REMOTE' OR downloadState = 'DOWNLOADED')"))
         assertEquals(listOf("src_device"), args(q))
@@ -49,7 +56,7 @@ class TrackQuerySqlTest {
     fun limitAndOffsetWrapInSubquery() {
         val q = TrackQuerySql.select(TrackQuery(sort = TrackSort.ADDED), limit = 500, offset = 7)
         assertEquals(
-            "SELECT * FROM (SELECT * FROM tracks ORDER BY addedAt DESC, id) LIMIT ? OFFSET ?",
+            "SELECT * FROM (SELECT * FROM tracks WHERE hidden = 0 ORDER BY addedAt DESC, id) LIMIT ? OFFSET ?",
             q.text(),
         )
         assertEquals(listOf(500L, 7L), args(q))
@@ -59,7 +66,7 @@ class TrackQuerySqlTest {
     fun countWrapsCore() {
         val q = TrackQuerySql.count(TrackQuery())
         assertEquals(
-            "SELECT COUNT(*) FROM (SELECT * FROM tracks ORDER BY title COLLATE NOCASE, id)",
+            "SELECT COUNT(*) FROM (SELECT * FROM tracks WHERE hidden = 0 ORDER BY title COLLATE NOCASE, id)",
             q.text(),
         )
     }
@@ -68,7 +75,7 @@ class TrackQuerySqlTest {
     fun idsWrapsCore() {
         val q = TrackQuerySql.ids(TrackQuery(sourceId = "s1"))
         assertEquals(
-            "SELECT id FROM (SELECT * FROM tracks WHERE sourceId = ? ORDER BY title COLLATE NOCASE, id)",
+            "SELECT id FROM (SELECT * FROM tracks WHERE hidden = 0 AND sourceId = ? ORDER BY title COLLATE NOCASE, id)",
             q.text(),
         )
         assertEquals(listOf("s1"), args(q))

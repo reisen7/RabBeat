@@ -13,21 +13,27 @@ import com.rabbeat.app.data.local.entity.SourceEntity
 import com.rabbeat.app.domain.model.SourceStatus
 import kotlinx.coroutines.flow.Flow
 
+private const val ALBUM_VISIBLE_SQL =
+    "SELECT a.id, a.sourceId, a.title, a.artist, a.year, a.artworkUri, a.addedAt, " +
+        "(SELECT COUNT(*) FROM tracks t WHERE t.albumId = a.id AND t.hidden = 0) AS trackCount " +
+        "FROM albums a " +
+        "WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.albumId = a.id AND t.hidden = 0)"
+
 @Dao
 interface AlbumDao {
-    @Query("SELECT * FROM albums ORDER BY title COLLATE NOCASE")
+    @Query("$ALBUM_VISIBLE_SQL ORDER BY a.title COLLATE NOCASE")
     fun observeAll(): Flow<List<AlbumEntity>>
 
-    @Query("SELECT * FROM albums ORDER BY title COLLATE NOCASE")
+    @Query("$ALBUM_VISIBLE_SQL ORDER BY a.title COLLATE NOCASE")
     fun pagingSource(): PagingSource<Int, AlbumEntity>
 
-    @Query("SELECT COUNT(*) FROM albums")
+    @Query("SELECT COUNT(*) FROM ($ALBUM_VISIBLE_SQL)")
     fun observeCount(): Flow<Int>
 
     @Query("SELECT * FROM albums WHERE id = :id")
     fun observeById(id: String): Flow<AlbumEntity?>
 
-    @Query("SELECT * FROM albums WHERE title LIKE '%' || :q || '%' OR artist LIKE '%' || :q || '%' ORDER BY title COLLATE NOCASE")
+    @Query("$ALBUM_VISIBLE_SQL AND (a.title LIKE '%' || :q || '%' OR a.artist LIKE '%' || :q || '%') ORDER BY a.title COLLATE NOCASE")
     fun search(q: String): Flow<List<AlbumEntity>>
 
     @Query("SELECT COUNT(*) FROM albums")
@@ -43,21 +49,28 @@ interface AlbumDao {
     suspend fun deleteDemo()
 }
 
+private const val ARTIST_VISIBLE_SQL =
+    "SELECT a.id, a.sourceId, a.name, a.artworkUri, " +
+        "(SELECT COUNT(DISTINCT t.albumId) FROM tracks t WHERE t.artistId = a.id AND t.hidden = 0) AS albumCount, " +
+        "(SELECT COUNT(*) FROM tracks t WHERE t.artistId = a.id AND t.hidden = 0) AS trackCount " +
+        "FROM artists a " +
+        "WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.artistId = a.id AND t.hidden = 0)"
+
 @Dao
 interface ArtistDao {
-    @Query("SELECT * FROM artists ORDER BY name COLLATE NOCASE")
+    @Query("$ARTIST_VISIBLE_SQL ORDER BY a.name COLLATE NOCASE")
     fun observeAll(): Flow<List<ArtistEntity>>
 
-    @Query("SELECT * FROM artists ORDER BY name COLLATE NOCASE")
+    @Query("$ARTIST_VISIBLE_SQL ORDER BY a.name COLLATE NOCASE")
     fun pagingSource(): PagingSource<Int, ArtistEntity>
 
-    @Query("SELECT COUNT(*) FROM artists")
+    @Query("SELECT COUNT(*) FROM ($ARTIST_VISIBLE_SQL)")
     fun observeCount(): Flow<Int>
 
     @Query("SELECT * FROM artists WHERE id = :id")
     fun observeById(id: String): Flow<ArtistEntity?>
 
-    @Query("SELECT * FROM artists WHERE name LIKE '%' || :q || '%' ORDER BY name COLLATE NOCASE")
+    @Query("$ARTIST_VISIBLE_SQL AND a.name LIKE '%' || :q || '%' ORDER BY a.name COLLATE NOCASE")
     fun search(q: String): Flow<List<ArtistEntity>>
 
     @Upsert
@@ -108,8 +121,13 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun get(id: String): PlaylistEntity?
 
-    @Query("SELECT * FROM playlist_tracks ORDER BY playlistId, position")
-    fun observeAllRefs(): Flow<List<PlaylistTrackCrossRef>>
+    @Query(
+        "SELECT pt.playlistId AS playlistId, COUNT(*) AS trackCount FROM playlist_tracks pt " +
+            "JOIN tracks t ON t.id = pt.trackId AND t.hidden = 0 GROUP BY pt.playlistId",
+    )
+    fun observeVisibleCounts(): Flow<List<PlaylistVisibleCount>>
+
+    data class PlaylistVisibleCount(val playlistId: String, val trackCount: Int)
 
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     fun observeRefs(playlistId: String): Flow<List<PlaylistTrackCrossRef>>

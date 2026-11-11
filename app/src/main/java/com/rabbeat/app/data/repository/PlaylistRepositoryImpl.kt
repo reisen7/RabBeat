@@ -28,13 +28,13 @@ class PlaylistRepositoryImpl @Inject constructor(
     private val database: RabBeatDatabase,
 ) : PlaylistRepository {
     override fun observePlaylists(): Flow<List<UserPlaylist>> =
-        combine(playlistDao.observeAll(), playlistDao.observeAllRefs()) { rows, refs ->
-            val counts = refs.groupingBy { it.playlistId }.eachCount()
+        combine(playlistDao.observeAll(), playlistDao.observeVisibleCounts()) { rows, counts ->
+            val byPlaylist = counts.associate { it.playlistId to it.trackCount }
             rows.map { row ->
                 UserPlaylist(
                     id = row.id,
                     name = row.name,
-                    trackCount = counts[row.id] ?: 0,
+                    trackCount = byPlaylist[row.id] ?: 0,
                     updatedAt = row.updatedAt,
                     isSystem = row.isSystem,
                 )

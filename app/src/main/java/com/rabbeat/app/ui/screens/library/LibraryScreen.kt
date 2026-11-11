@@ -216,6 +216,7 @@ class LibraryViewModel @Inject constructor(
     fun enqueue(track: Track) = player.enqueue(track)
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
     fun importDevice(onDone: (Int) -> Unit) {
         viewModelScope.launch {
             if (!scanner.hasAudioPermission()) {
@@ -374,6 +375,7 @@ private fun LibraryBody(
                                         { vm.favorite(track.id) },
                                         { vm.download(track.id) },
                                         onAddToPlaylist = { addTrackId = track.id },
+                                        onHide = { vm.hide(track.id) },
                                         playing = track.id == bundle.currentTrackId,
                                     )
                                 }
@@ -581,6 +583,7 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
                                 { vm.enqueue(track) },
                                 { vm.favorite(track.id) },
                                 { vm.download(track.id) },
+                                onHide = { vm.hide(track.id) },
                             )
                         }
                     }

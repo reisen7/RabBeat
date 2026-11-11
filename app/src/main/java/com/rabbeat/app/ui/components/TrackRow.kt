@@ -18,21 +18,25 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.widget.Toast
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -84,11 +88,14 @@ fun TrackRow(
     modifier: Modifier = Modifier,
     onAddToPlaylist: (() -> Unit)? = null,
     onRemove: (() -> Unit)? = null,
+    onHide: (() -> Unit)? = null,
     playing: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     showMenu: Boolean = true,
 ) {
     var menu by remember(track.id) { mutableStateOf(false) }
+    var confirmHide by remember(track.id) { mutableStateOf(false) }
+    val context = LocalContext.current
     val accent = LocalAccentPalette.current
     val palette = LocalRabBeatPalette.current
 
@@ -177,6 +184,12 @@ fun TrackRow(
                     ) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.menu_download)) }, onClick = { menu = false; onDownload() })
                     }
+                    if (onHide != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_hide)) },
+                            onClick = { menu = false; confirmHide = true },
+                        )
+                    }
                 }
                 }
             }
@@ -187,6 +200,29 @@ fun TrackRow(
                 .padding(start = 80.dp)
                 .height(0.5.dp)
                 .background(palette.separator),
+        )
+    }
+    if (confirmHide && onHide != null) {
+        AlertDialog(
+            onDismissRequest = { confirmHide = false },
+            title = { Text(stringResource(R.string.hide_dialog_title)) },
+            text = { Text(stringResource(R.string.hide_dialog_body, track.title)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmHide = false
+                    onHide()
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.hidden_toast),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text(stringResource(R.string.hide_dialog_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmHide = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 }

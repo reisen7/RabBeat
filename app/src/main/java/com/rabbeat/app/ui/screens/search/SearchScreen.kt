@@ -111,6 +111,7 @@ class SearchViewModel @Inject constructor(
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
     fun playNext(track: com.rabbeat.app.domain.model.Track) = player.playNext(track)
     fun enqueue(track: com.rabbeat.app.domain.model.Track) = player.enqueue(track)
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -236,6 +237,7 @@ fun SearchScreen(
                                 onFavorite = { vm.favorite(track.id) },
                                 onDownload = { vm.download(track.id) },
                                 onAddToPlaylist = { addTrackId = track.id },
+                                onHide = { vm.hide(track.id) },
                             )
                         }
                     }

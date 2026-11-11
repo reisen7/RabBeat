@@ -93,6 +93,7 @@ class AlbumDetailViewModel @Inject constructor(
     fun play(tracks: List<Track>, index: Int) = player.playQueue(tracks, index)
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
 }
 
 @Composable
@@ -168,6 +169,7 @@ fun AlbumDetailScreen(albumId: String, onBack: () -> Unit, vm: AlbumDetailViewMo
                         { vm.favorite(track.id) },
                         { vm.download(track.id) },
                         onAddToPlaylist = { addTrackId = track.id },
+                        onHide = { vm.hide(track.id) },
                     )
                 }
             }

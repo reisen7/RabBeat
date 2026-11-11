@@ -76,6 +76,7 @@ import com.rabbeat.app.data.local.FolderImportResult
 import com.rabbeat.app.data.local.FolderLibraryImporter
 import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.model.UserPlaylist
+import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.PlaylistRepository
 import com.rabbeat.app.playback.PlayerController
 import com.rabbeat.app.ui.components.AccentButton
@@ -108,6 +109,7 @@ class PlaylistDetailViewModel @Inject constructor(
     private val playlists: PlaylistRepository,
     private val player: PlayerController,
     private val folders: FolderLibraryImporter,
+    private val music: MusicRepository,
 ) : ViewModel() {
     private val _importing = MutableStateFlow(false)
     val importing = _importing.asStateFlow()
@@ -136,6 +138,9 @@ class PlaylistDetailViewModel @Inject constructor(
     }
     fun remove(playlistId: String, trackId: String) {
         viewModelScope.launch { playlists.removeTrack(playlistId, trackId) }
+    }
+    fun hide(trackId: String) {
+        viewModelScope.launch { music.hide(listOf(trackId)) }
     }
     fun removeTracks(playlistId: String, trackIds: List<String>) {
         viewModelScope.launch { playlists.removeTracks(playlistId, trackIds) }
@@ -427,6 +432,7 @@ fun PlaylistDetailScreen(
                                     onDownload = {},
                                     onAddToPlaylist = { addTrackId = track.id },
                                     onRemove = { vm.remove(playlistId, track.id) },
+                                    onHide = { vm.hide(track.id) },
                                     playing = track.id == page.currentTrackId,
                                     showMenu = !selecting,
                                     onLongClick = if (!canDrag && !selecting) {

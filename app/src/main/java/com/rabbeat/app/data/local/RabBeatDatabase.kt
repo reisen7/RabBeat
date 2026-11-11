@@ -34,7 +34,7 @@ import com.rabbeat.app.data.local.entity.TrackEntity
         PlayHistoryEntity::class,
         LyricLinkEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)

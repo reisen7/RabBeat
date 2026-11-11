@@ -115,6 +115,7 @@ class NeteasePlaylistImporter @Inject constructor(
                         addedAt = preserved.addedAt,
                         downloadState = preserved.downloadState,
                         lyricUri = preserved.lyricUri,
+                        hidden = preserved.hidden,
                     )
                 } else {
                     entity

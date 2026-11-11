@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
@@ -199,6 +200,8 @@ class SettingsViewModel @Inject constructor(
     val neteaseImport = MutableStateFlow<NeteaseImport>(NeteaseImport.Idle)
     private var importJob: Job? = null
     val mediaCacheBytes = MutableStateFlow(0L)
+    val hiddenCount = trackDao.observeHiddenCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun refreshMediaCache() { mediaCacheBytes.value = mediaCache.usedBytes }
 
@@ -238,11 +241,13 @@ fun SettingsScreen(
     onDownloads: () -> Unit,
     onHistory: () -> Unit,
     onAppearance: () -> Unit,
+    onHidden: () -> Unit,
     vm: SettingsViewModel = hiltViewModel(),
 ) {
     val state by vm.page.collectAsStateWithLifecycle()
     val neteaseImport by vm.neteaseImport.collectAsStateWithLifecycle()
     val mediaCacheBytes by vm.mediaCacheBytes.collectAsStateWithLifecycle()
+    val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshMediaCache() }
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -319,6 +324,7 @@ fun SettingsScreen(
                 is ScreenState.Ready -> SettingsBody(
                     page = current.value,
                     mediaCacheBytes = mediaCacheBytes,
+                    hiddenCount = hiddenCount,
                     onNeteaseImport = { neteaseOpen = true },
                     onMediaCache = { cacheConfirm = true },
                     onAppearance = onAppearance,
@@ -340,6 +346,7 @@ fun SettingsScreen(
                     },
                     onBackup = { exportLauncher.launch("rabbeat-backup.json") },
                     onRestore = { restoreConfirm = true },
+                    onHidden = onHidden,
                     onClearCache = {
                         SingletonImageLoader.get(context).memoryCache?.clear()
                         SingletonImageLoader.get(context).diskCache?.clear()
@@ -464,6 +471,7 @@ fun SettingsScreen(
 private fun SettingsBody(
     page: SettingsPage,
     mediaCacheBytes: Long,
+    hiddenCount: Int,
     onNeteaseImport: () -> Unit,
     onMediaCache: () -> Unit,
     onAppearance: () -> Unit,
@@ -476,6 +484,7 @@ private fun SettingsBody(
     onRescan: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
+    onHidden: () -> Unit,
     onClearCache: () -> Unit,
     onLicenses: () -> Unit,
     onFilterNonSongs: (Boolean) -> Unit,
@@ -602,6 +611,14 @@ private fun SettingsBody(
                 title = stringResource(R.string.settings_restore),
                 subtitle = stringResource(R.string.settings_restore_short),
                 onClick = onRestore,
+            )
+            GroupDivider()
+            SettingRow(
+                icon = Icons.Filled.VisibilityOff,
+                    iconColor = androidx.compose.ui.graphics.Color(0xFF8E8E93),
+                title = stringResource(R.string.settings_hidden_tracks),
+                subtitle = stringResource(R.string.hidden_track_subtitle, hiddenCount),
+                onClick = onHidden,
             )
         }
 

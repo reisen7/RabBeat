@@ -36,6 +36,7 @@ class NeteaseReconciler @Inject constructor(
                     remote.playCount,
                     remote.lastPlayedAt,
                     remote.addedAt,
+                    remote.hidden,
                 )
                 dead += remote.id
             }

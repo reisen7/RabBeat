@@ -11,6 +11,7 @@ internal object TrackQuerySql {
     private fun where(query: TrackQuery): Pair<String, List<Any>> {
         val clauses = mutableListOf<String>()
         val args = mutableListOf<Any>()
+        clauses += if (query.hiddenOnly) "hidden = 1" else "hidden = 0"
         query.sourceId?.let {
             clauses += "sourceId = ?"
             args += it

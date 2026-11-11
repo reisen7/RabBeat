@@ -152,6 +152,16 @@ class MusicRepositoryImpl @Inject constructor(
         trackDao.updateDuration(id, durationMs)
     }
 
+    override suspend fun hide(ids: List<String>) {
+        ids.chunked(400).forEach { trackDao.setHidden(it, true) }
+    }
+
+    override suspend fun unhide(ids: List<String>) {
+        ids.chunked(400).forEach { trackDao.setHidden(it, false) }
+    }
+
+    override fun observeHiddenCount(): Flow<Int> = trackDao.observeHiddenCount()
+
     override fun observePlayHistory(): Flow<List<PlayRecord>> =
         combine(historyDao.observeRecent(200), observeTracks()) { rows, tracks ->
             val byId = tracks.associateBy { it.id }

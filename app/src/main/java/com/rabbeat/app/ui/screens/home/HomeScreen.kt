@@ -90,6 +90,7 @@ class HomeViewModel @Inject constructor(
     val colors: ArtworkColorCache,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: com.rabbeat.app.domain.repository.DownloadRepository,
+    private val music: com.rabbeat.app.domain.repository.MusicRepository,
 ) : ViewModel() {
     val nowPlaying = player.state
         .map { NowPlaying(it.currentTrack, it.isPlaying) }
@@ -107,6 +108,7 @@ class HomeViewModel @Inject constructor(
     fun play(tracks: List<Track>, index: Int) = player.playQueue(tracks, index)
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
 }
 
 @Composable
@@ -145,6 +147,7 @@ fun HomeScreen(
                 },
                 onFavorite = vm::favorite,
                 onDownload = vm::download,
+                onHide = vm::hide,
                 colors = vm.colors,
             )
         }
@@ -164,6 +167,7 @@ private fun HomeFeed(
     onPlay: (Track) -> Unit,
     onFavorite: (String) -> Unit,
     onDownload: (String) -> Unit,
+    onHide: (String) -> Unit,
     colors: ArtworkColorCache,
 ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 26.dp)) {
@@ -274,6 +278,7 @@ private fun HomeFeed(
                     onEnqueue = { onPlay(track) },
                     onFavorite = { onFavorite(track.id) },
                     onDownload = { onDownload(track.id) },
+                    onHide = { onHide(track.id) },
                     playing = current?.id == track.id,
                 )
             }

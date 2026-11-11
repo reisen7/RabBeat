@@ -43,6 +43,9 @@ interface MusicRepository {
     suspend fun toggleFavorite(id: String)
     suspend fun recordPlayback(id: String, positionMs: Long)
     suspend fun updateDuration(id: String, durationMs: Long)
+    suspend fun hide(ids: List<String>)
+    suspend fun unhide(ids: List<String>)
+    fun observeHiddenCount(): Flow<Int>
     fun observePlayHistory(): Flow<List<PlayRecord>>
     suspend fun clearPlayHistory()
 }

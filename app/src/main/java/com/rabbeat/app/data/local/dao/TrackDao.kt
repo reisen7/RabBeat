@@ -14,27 +14,34 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TrackDao {
-    @Query("SELECT * FROM tracks ORDER BY title COLLATE NOCASE")
+    @Query("SELECT * FROM tracks WHERE hidden = 0 ORDER BY title COLLATE NOCASE")
     fun observeAll(): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE albumId = :albumId ORDER BY discNumber, trackNumber")
+    @Query("SELECT * FROM tracks WHERE albumId = :albumId AND hidden = 0 ORDER BY discNumber, trackNumber")
     fun observeByAlbum(albumId: String): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE artistId = :artistId ORDER BY album, discNumber, trackNumber")
+    @Query("SELECT * FROM tracks WHERE artistId = :artistId AND hidden = 0 ORDER BY album, discNumber, trackNumber")
     fun observeByArtist(artistId: String): Flow<List<TrackEntity>>
 
     @Query(
-        "SELECT * FROM tracks WHERE title LIKE '%' || :q || '%' " +
-            "OR artist LIKE '%' || :q || '%' OR album LIKE '%' || :q || '%' " +
+        "SELECT * FROM tracks WHERE hidden = 0 AND (" +
+            "title LIKE '%' || :q || '%' " +
+            "OR artist LIKE '%' || :q || '%' OR album LIKE '%' || :q || '%') " +
             "ORDER BY title COLLATE NOCASE",
     )
     fun search(q: String): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks ORDER BY addedAt DESC LIMIT :limit")
+    @Query("SELECT * FROM tracks WHERE hidden = 0 ORDER BY addedAt DESC LIMIT :limit")
     fun observeRecentlyAdded(limit: Int): Flow<List<TrackEntity>>
 
-    @Query("SELECT * FROM tracks WHERE origin != 'REMOTE' OR downloadState = 'DOWNLOADED' ORDER BY title COLLATE NOCASE")
+    @Query("SELECT * FROM tracks WHERE hidden = 0 AND (origin != 'REMOTE' OR downloadState = 'DOWNLOADED') ORDER BY title COLLATE NOCASE")
     fun observeOfflineAvailable(): Flow<List<TrackEntity>>
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE hidden = 1")
+    fun observeHiddenCount(): Flow<Int>
+
+    @Query("UPDATE tracks SET hidden = :hidden WHERE id IN (:ids)")
+    suspend fun setHidden(ids: List<String>, hidden: Boolean)
 
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun get(id: String): TrackEntity?
@@ -62,7 +69,7 @@ interface TrackDao {
 
     @Query(
         "SELECT COALESCE(NULLIF(TRIM(folder), ''), '本地') AS path, COUNT(*) AS trackCount " +
-            "FROM tracks GROUP BY path ORDER BY path",
+            "FROM tracks WHERE hidden = 0 GROUP BY path ORDER BY path",
     )
     fun observeFolders(): Flow<List<FolderSummary>>
 
@@ -72,11 +79,12 @@ interface TrackDao {
     @Query(
         "UPDATE tracks SET isFavorite = isFavorite OR :isFavorite, " +
             "playCount = MAX(playCount, :playCount), " +
+            "hidden = hidden OR :hidden, " +
             "lastPlayedAt = CASE WHEN :lastPlayedAt IS NULL THEN lastPlayedAt " +
             "WHEN lastPlayedAt IS NULL OR lastPlayedAt < :lastPlayedAt THEN :lastPlayedAt ELSE lastPlayedAt END, " +
             "addedAt = MIN(addedAt, :addedAt) WHERE id = :id",
     )
-    suspend fun mergeStatsInto(id: String, isFavorite: Boolean, playCount: Int, lastPlayedAt: Long?, addedAt: Long)
+    suspend fun mergeStatsInto(id: String, isFavorite: Boolean, playCount: Int, lastPlayedAt: Long?, addedAt: Long, hidden: Boolean = false)
 
     @Query("UPDATE OR IGNORE playlist_tracks SET trackId = :to WHERE trackId = :from")
     suspend fun reassignPlaylistTracks(from: String, to: String)
@@ -119,6 +127,8 @@ interface TrackDao {
 
     @Query("UPDATE tracks SET isFavorite = :value WHERE id = :id")
     suspend fun setFavorite(id: String, value: Boolean)
+
+
 
     @Query("SELECT id FROM tracks WHERE isFavorite = 1")
     suspend fun favoriteIds(): List<String>

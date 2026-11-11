@@ -79,7 +79,7 @@ class LocalMediaScanner @Inject constructor(
                     if (winner in plan.keptIds) {
                         losersByWinner.getOrPut(winner) { mutableListOf() } += entity
                     } else {
-                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt)
+                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt, entity.hidden)
                     }
                 }
             }
@@ -133,6 +133,7 @@ class LocalMediaScanner @Inject constructor(
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.addedAt,
                     lyricUri = row.lyricUri ?: preserved?.lyricUri,
                     folder = row.folder,
+                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden },
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }

@@ -5,6 +5,7 @@ data class TrackQuery(
     val sourceId: String? = null,
     val offlineOnly: Boolean = false,
     val folderPath: String? = null,
+    val hiddenOnly: Boolean = false,
 )
 
 data class FolderSummary(val path: String, val trackCount: Int)

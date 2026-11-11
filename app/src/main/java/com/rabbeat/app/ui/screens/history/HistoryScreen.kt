@@ -90,6 +90,7 @@ class HistoryViewModel @Inject constructor(
 
     fun play(tracks: List<Track>, index: Int) = player.playQueue(tracks, index)
     fun clearHistory() { viewModelScope.launch { music.clearPlayHistory() } }
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
 }
 
 @Composable
@@ -134,7 +135,7 @@ fun HistoryScreen(onBack: () -> Unit, vm: HistoryViewModel = hiltViewModel()) {
                 is ScreenState.Ready -> {
                     val page = current.value
                     if (tab == 0) {
-                        RecentList(page.recent) { index -> vm.play(page.recent.map { it.track }, index) }
+                        RecentList(page.recent, { index -> vm.play(page.recent.map { it.track }, index) }, vm::hide)
                     } else {
                         CountList(page) { index -> vm.play(page.ranked, index) }
                     }
@@ -146,7 +147,7 @@ fun HistoryScreen(onBack: () -> Unit, vm: HistoryViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun RecentList(records: List<PlayRecord>, onPlay: (Int) -> Unit) {
+private fun RecentList(records: List<PlayRecord>, onPlay: (Int) -> Unit, onHide: (String) -> Unit) {
     if (records.isEmpty()) {
         EmptyState(stringResource(R.string.history_empty), Modifier.fillMaxSize())
         return
@@ -160,7 +161,7 @@ private fun RecentList(records: List<PlayRecord>, onPlay: (Int) -> Unit) {
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TrackRow(record.track, { onPlay(index) }, { onPlay(index) }, { onPlay(index) }, {}, {})
+                TrackRow(record.track, { onPlay(index) }, { onPlay(index) }, { onPlay(index) }, {}, {}, onHide = { onHide(record.track.id) })
             }
         }
     }

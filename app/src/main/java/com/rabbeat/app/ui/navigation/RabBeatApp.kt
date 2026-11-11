@@ -54,6 +54,7 @@ import com.rabbeat.app.ui.screens.detail.AlbumDetailScreen
 import com.rabbeat.app.ui.screens.detail.ArtistDetailScreen
 import com.rabbeat.app.ui.screens.detail.SourceDetailScreen
 import com.rabbeat.app.ui.screens.downloads.DownloadsScreen
+import com.rabbeat.app.ui.screens.hidden.HiddenTracksScreen
 import com.rabbeat.app.ui.screens.history.HistoryScreen
 import com.rabbeat.app.ui.screens.home.HomeScreen
 import com.rabbeat.app.ui.screens.library.LibraryScreen
@@ -85,6 +86,7 @@ sealed interface Route {
     @Serializable data object Queue : Route
     @Serializable data object Downloads : Route
     @Serializable data object History : Route
+    @Serializable data object HiddenTracks : Route
     @Serializable data object Settings : Route
     @Serializable data object Appearance : Route
     @Serializable data class AlbumDetail(val albumId: String) : Route
@@ -285,8 +287,10 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onDownloads = { navController.navigate(Route.Downloads) },
                         onHistory = { navController.navigate(Route.History) },
                         onAppearance = { navController.navigate(Route.Appearance) },
+                        onHidden = { navController.navigate(Route.HiddenTracks) },
                     )
                 }
+                composable<Route.HiddenTracks> { HiddenTracksScreen(onBack = { navController.popBackStack() }) }
                 composable<Route.Appearance> {
                     AppearanceScreen(onBack = { navController.popBackStack() })
                 }
@@ -340,6 +344,7 @@ private fun NavDestination?.tabIndex(): Int = when {
     hasRoute<Route.Profile>() ||
         hasRoute<Route.PlaylistDetail>() ||
         hasRoute<Route.Settings>() ||
+        hasRoute<Route.HiddenTracks>() ||
         hasRoute<Route.Downloads>() ||
         hasRoute<Route.History>() ||
         hasRoute<Route.Appearance>() -> 3
@@ -357,7 +362,7 @@ private fun NavDestination?.drawerSection(): DrawerSection? = when {
     hasRoute<Route.History>() -> DrawerSection.History
     hasRoute<Route.Downloads>() -> DrawerSection.Downloads
     hasRoute<Route.Appearance>() -> DrawerSection.Appearance
-    hasRoute<Route.Settings>() -> DrawerSection.Settings
+    hasRoute<Route.Settings>() || hasRoute<Route.HiddenTracks>() -> DrawerSection.Settings
     else -> null
 }
 

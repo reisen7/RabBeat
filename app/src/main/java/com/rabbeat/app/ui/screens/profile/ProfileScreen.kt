@@ -101,7 +101,7 @@ data class ProfilePage(
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-    music: MusicRepository,
+    private val music: MusicRepository,
     private val playlists: PlaylistRepository,
     val player: PlayerController,
     private val favorites: ToggleFavoriteUseCase,
@@ -149,6 +149,7 @@ class ProfileViewModel @Inject constructor(
     fun enqueue(track: Track) = player.enqueue(track)
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
+    fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
     fun createPlaylist(name: String, onCreated: (String) -> Unit) = viewModelScope.launch {
         onCreated(playlists.create(name))
     }
@@ -183,6 +184,7 @@ fun ProfileScreen(
             onPlayNext = vm::playNext,
             onEnqueue = vm::enqueue,
             onDownload = vm::download,
+            onHide = vm::hide,
         )
     }
 
@@ -208,6 +210,7 @@ private fun ProfileBody(
     onPlayNext: (Track) -> Unit,
     onEnqueue: (Track) -> Unit,
     onDownload: (String) -> Unit,
+    onHide: (String) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 26.dp)) {
         item {
@@ -339,6 +342,7 @@ private fun ProfileBody(
                     onEnqueue = { onEnqueue(record.track) },
                     onFavorite = { onFavorite(record.track.id) },
                     onDownload = { onDownload(record.track.id) },
+                    onHide = { onHide(record.track.id) },
                     playing = record.track.id == page.currentTrackId,
                 )
             }

@@ -1,5 +1,6 @@
 package com.rabbeat.app.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -42,4 +43,5 @@ data class TrackEntity(
     val addedAt: Long,
     val lyricUri: String? = null,
     val folder: String? = null,
+    @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
 )
