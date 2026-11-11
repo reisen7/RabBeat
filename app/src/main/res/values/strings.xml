@@ -260,6 +260,7 @@
     <string name="playlist_no_tracks">歌单里还没有歌</string>
     <string name="playlist_locate">定位到正在播放</string>
     <string name="playlist_sort_order">歌单顺序</string>
+    <string name="copied">已复制「%1$s」</string>
     <string name="playlist_drag_hint">切换到「歌单顺序」并清空搜索后才能拖动排序</string>
     <string name="playlist_sort_artist">按歌手</string>
     <string name="playlist_sort_album">按专辑</string>

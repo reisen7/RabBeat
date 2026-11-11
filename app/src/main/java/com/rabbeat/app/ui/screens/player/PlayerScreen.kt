@@ -248,6 +248,7 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                                 style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.copyOnLongPress(track.title),
                             )
                             Text(
                                 track.artist,
@@ -255,6 +256,7 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                                 style = MaterialTheme.typography.bodyMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.copyOnLongPress(track.artist),
                             )
                         }
                     }
@@ -308,6 +310,7 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                             color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.copyOnLongPress(track.title),
                         )
                         Text(
                             track.artist,
@@ -315,6 +318,7 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                             color = Color.White.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.copyOnLongPress(track.artist),
                         )
                         state.error?.let {
                             Text(it, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
@@ -728,4 +732,20 @@ private fun PlayerPill(text: String, onClick: () -> Unit, modifier: Modifier = M
             .clickable(onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 8.dp),
     )
+}
+
+@Composable
+private fun Modifier.copyOnLongPress(text: String): Modifier {
+    val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    return pointerInput(text) {
+        detectTapGestures(onLongPress = {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(android.content.ClipData.newPlainText(text, text))
+            if (android.os.Build.VERSION.SDK_INT < 33) {
+                Toast.makeText(context, context.getString(R.string.copied, text), Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
 }
