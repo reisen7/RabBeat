@@ -1,80 +1,130 @@
-# RabBeat（兔拍）v0.1
+# RabBeat（兔拍）
 
-离线优先的个人音乐播放器原型。包名 `com.rabbeat.app`。当前实现覆盖设计文档的 M0–M3，并已接上本机 MediaStore 扫描。
+离线优先的 Android 本地音乐播放器，Apple Music 风格界面。包名 `com.rabbeat.app`，支持 Android 8.0（API 26）及以上。
 
-## 环境
+## 下载
+
+在 [Releases](https://github.com/reisen7/RabBeat/releases) 下载最新的 `RabBeat-<版本>.apk` 直接安装。每个 APK 旁边附有 `.sha256` 校验文件。
+
+## 功能
+
+### 曲库
+
+- **扫描本机**：读取系统媒体库，按扫描规则过滤非歌曲文件、小文件和短音频，并匹配同名 `.lrc` 歌词。
+- **导入文件夹**：通过系统文件管理器选择文件夹导入，之后可一键重新扫描。
+- **自动去重**：歌名、歌手相同且时长相差 2 秒以内视为同一首；优先保留无损、体积更大的文件，歌单、播放记录、「我喜欢」和播放次数会合并到保留的那份上。
+- **数据库分页**：曲库的歌曲、专辑、艺人、文件夹和首页列表都从数据库按页读取，大曲库也不会一次性读进内存；排序和筛选在 SQL 中完成。
+
+### 播放
+
+- 基于 Media3 / ExoPlayer，支持后台播放、通知栏和锁屏控制、播放进度持久化、睡眠定时（可淡出）和倍速。
+- 播放页背景取封面主色；点击封面进入歌词，歌词支持逐行滚动、点击跳转、翻译显示、字号调节，以及借用其他歌曲的歌词。
+- 长按歌名或歌手名可复制。
+- 「…」菜单：添加到歌单、关联歌词、歌词字号、睡眠定时、播放速度。
+
+### 歌单
+
+- 每个人都有固定在首位的系统歌单「我喜欢」，播放页的心形按钮即加入 / 移出「我喜欢」。
+- 「我的歌单」管理页：拖动调整歌单顺序、批量删除歌单。
+- 歌单详情：长按拖动调整歌曲顺序、搜索、排序、从文件夹导入歌曲；多选后可批量「下一首播放」「添加到歌单」「从歌单删除」。
+
+### 网易云歌单导入
+
+- 设置 → 导入网易云歌单，粘贴分享链接（网页链接、App 分享文字、`163cn.tv` 短链或歌单 ID 均可）。
+- 本地已有的歌直接使用本地文件；其余可播放的歌曲在线播放，边听边缓存（上限 2 GB，按最久未听淘汰），缓存后可离线播放；VIP 和已下架歌曲跳过。
+- 自动获取歌词（含翻译）并缓存。
+- 重名歌单自动加 `new` 后缀；重新导入同一歌单会按网易云顺序更新原歌单。
+- 之后扫描到同一首歌的本地文件时，会自动替换为本地文件。
+
+> 网易云接口并非官方开放接口，可能随时变更或限流。缓存的音频仅供个人收听。
+
+### 个性化
+
+- 自定义背景图：从相册选择后按手机屏幕比例裁剪（双指缩放、拖动、双击放大），保留原图以便之后重新裁剪。
+- 背景模糊、背景压暗、卡片不透明度可调；有背景图时卡片为半透明毛玻璃。
+- 五种强调色，深色 / 浅色 / 跟随系统三种主题。
+- 一键恢复默认外观（会先确认）。
+
+### 其他
+
+- 曲库备份与恢复（歌单、「我喜欢」、播放记录）。
+- 播放历史与播放统计（本周播放、累计播放、常听艺人）。
+
+## 开发环境
 
 - JDK 17（`gradle/gradle-daemon-jvm.properties` 将 Gradle daemon 固定为 17）
-- Android SDK：`compileSdk` 37.2，`targetSdk` 35，`minSdk` 26。AGP 固定在 9.2.1，以便当前 Android Studio 能打开；依赖库仍要求编译 SDK 37.2，因此 `gradle.properties` 里抑制了这条兼容性警告。
-- 本机 SDK 路径写在 `local.properties` 的 `sdk.dir`（该文件不入库）
-- Gradle 9.9.0。官方分发地址曾返回 504，wrapper 使用腾讯镜像：`https://mirrors.cloud.tencent.com/gradle/gradle-9.9.0-bin.zip`
-- AGP 9.2 自带 Kotlin，不要再应用 `org.jetbrains.kotlin.android`
+- Android SDK：`compileSdk` 37.2，`targetSdk` 35，`minSdk` 26
+- Gradle 9.9.0（wrapper 使用腾讯镜像），Android Gradle Plugin 9.2.1（自带 Kotlin，不要再应用 `org.jetbrains.kotlin.android`）
+- 本机 SDK 路径写在 `local.properties` 的 `sdk.dir`（不入库）
 
-## 依赖版本
+### 主要依赖
 
 | 组件 | 版本 |
 |---|---|
-| Android Gradle Plugin | 9.2.1 |
 | Kotlin | 2.4.21 |
 | KSP | 2.3.12 |
 | Compose BOM | 2026.09.00 |
 | Navigation Compose | 2.10.2 |
 | Hilt | 2.60.1 |
-| Hilt Navigation Compose | 1.4.0 |
-| Room | 2.8.5 |
+| Room / Room Paging | 2.8.5 |
+| Paging Compose | 3.5.3 |
 | Media3 | 1.11.1 |
-| Coil 3 | 3.6.3 |
+| Coil 3（含 OkHttp 网络组件） | 3.6.3 |
 | DataStore | 1.3.0 |
-| WorkManager | 2.12.0 |
 | OkHttp | 4.12.0 |
 | kotlinx-serialization | 1.9.0 |
-| Coroutines | 1.10.2 |
+| Reorderable | 3.1.0 |
 
-## 运行
+### 构建
 
 用 Android Studio 打开本目录，或在项目根目录执行：
 
 ```bat
 gradlew.bat :app:assembleDebug
+gradlew.bat :app:testDebugUnitTest
 ```
 
-## 里程碑
+Debug APK 位于 `app/build/outputs/apk/debug/app-debug.apk`。
 
-- **M0** 主题、类型安全导航、底部四个 Tab、Mini Player、Hilt 入口。
-- **M1** Room 曲库。演示数据只保留本机来源；客厅和 NAS 已移除。真实歌曲来自本机扫描。
-- **M2** `RabBeatPlaybackService` + ExoPlayer：播放、队列、通知、进度持久化、睡眠定时。冷启动恢复上次曲目，暂停恢复时不会拉起前台服务。
-- **M3** 首页、曲库、搜索、队列、下载、设置、引导页和专辑 / 艺人 / 来源详情。页面含 Loading / Empty / Error。
-- **M4** 本机扫描已查询 MediaStore，写入来源「本机音乐」。演示数据仍可从调试入口注入。
-- **M5** 界面重做：新增首页与「个性化」设置。
-- **M6** 界面改为 Apple Music 风格：纯色底、iOS 字号、全宽 Tab 栏、分组列表设置页、封面主色驱动的播放页。
+### 签名与发布
 
-## 界面与个性化
+本地打 release 包时，在项目根目录放置签名文件，并新建 `keystore.properties`（两者都已被 `.gitignore` 排除）：
 
-界面基于 Material 3 自建了一套 Apple Music 风格的设计系统，没有引入额外的 UI 依赖：
+```properties
+storeFile=rabbeat-release.jks
+storePassword=******
+keyAlias=rabbeat
+keyPassword=******
+```
 
-- 配色 token 在 `ui/theme/Color.kt` 的 `RabBeatPalette`（background / groupedBackground / card / elevated / fill / separator / secondaryLabel 等，对应 iOS 系统色）；字号在 `Type.kt`，对应 iOS Large Title / Title2 / Headline / Body / Footnote。
-- 全局背景：纯色 + 可选的自定义图片；有背景图时卡片类表面变为 92% 不透明（`LocalHasBackgroundImage`）。
-- 播放页背景取当前封面主色，暂停时封面缩小；首页「继续播放」卡同样取封面主色。
-- 个性化（设置 → 个性化，或设置页第一组）：从相册选择背景图片、开关背景、模糊强度 0–40dp、压暗 0–90%、五种强调色（紫罗兰 / 琥珀 / 海洋 / 薄荷 / 玫瑰，默认玫瑰红 #FA2D48）、系统 / 深色 / 浅色三种主题，以及一键恢复默认。
-- 背景图直接用系统相册（Android Photo Picker，低版本自动回退到文件选择器）选取，选中后会复制一份到应用私有目录 `files/backgrounds`，所以重启、甚至原图被删除后都仍然可用；移除背景时会一并删除这份副本。设置存放在 DataStore（`appearance_accent`、`appearance_background_uri`、`appearance_background_enabled`、`appearance_background_blur`、`appearance_background_dim`）。
-- 模糊使用 Compose `Modifier.blur`，在 Android 12（API 31）及以上生效；更低版本自动退化为渐变遮罩。
+然后执行 `gradlew.bat :app:assembleRelease`。没有签名配置时会生成未签名的 APK。
 
-## 导航与个人页
+GitHub Actions（`.github/workflows/release.yml`）在推送 `v*` tag 或手动运行时，从仓库 Secrets（`RABBEAT_KEYSTORE_BASE64`、`RABBEAT_KEYSTORE_PASSWORD`、`RABBEAT_KEY_ALIAS`、`RABBEAT_KEY_PASSWORD`）恢复签名，构建 release APK 并发布 GitHub Release。版本名取自 tag（`v1.2.3` → `1.2.3`），版本号按 `主×10000 + 次×100 + 修订` 计算，带后缀的 tag（如 `v1.2.3-beta.1`）发布为预发布。
 
-- 首页、曲库、搜索、个人四个主页面左上角都有三横按钮，点击从左侧滑出抽屉（宽 86%、右侧圆角、半透明玻璃底），分为「浏览 / 我的 / 设置」三组，底部是返回桌面、版本号与「关于兔拍」。
-- 底部导航第 4 项由「设置」改为「个人」：顶部是个人卡片与收藏 / 累计播放 / 歌单三个数字，接着是「我的歌单」横向卡片（可新建并直接进入歌单）、播放数据（本周播放、累计播放、听过歌曲）、常听艺人 Top 3 与最近播放。
-- 歌单不再放在曲库，统一在个人页管理；新建、改名、删除与添加曲目沿用歌单详情页。
-- 设置仍可从个人页右上角或抽屉进入。
+```bash
+git tag v0.0.2
+git push origin v0.0.2
+```
+
+## 项目结构
+
+```
+app/src/main/java/com/rabbeat/app/
+├── data/
+│   ├── local/        Room 数据库、本机扫描、文件夹导入、去重、网易云导入、备份
+│   ├── remote/       网易云接口（netease）、Subsonic 占位
+│   └── repository/   曲库、歌单、设置、歌词仓库
+├── domain/           模型、仓库接口、用例
+├── playback/         播放服务、PlayerController、在线缓存
+├── ui/               Compose 页面、组件、主题、导航
+└── util/             LRC 解析、封面取色、网络状态等
+```
 
 ## 已知限制
 
-- 所有示例曲目共用 `res/raw/sample_tone.wav`，按每首歌的时长截断播放。
-- 下载是内存里的假进度（排队 → 下载中 → 已下载），WorkManager 任务是占位。
-- Subsonic 客户端是 stub，没有真实 `/rest` 请求。SMB / WebDAV 同样只走 Mock。
-- 密码存在 DataStore，尚未换成 EncryptedSharedPreferences。
-- 设备离线时曲库只保留可离线曲目。
-- 尚未在真机上跑过播放和通知，只确认 `assembleDebug` 通过。
-- 背景模糊在 Android 11 及以下不生效，仅保留渐变遮罩。
+- Subsonic / SMB / WebDAV 远程来源只有占位实现，界面入口已隐藏。
+- 下载页的进度是占位实现。
+- 背景模糊依赖 Android 12（API 31）及以上，更低版本只有压暗遮罩。
 
 ## 许可证
 
