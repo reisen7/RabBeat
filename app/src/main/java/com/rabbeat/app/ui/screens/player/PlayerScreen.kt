@@ -276,8 +276,6 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                         listState = lyricState,
                         onScale = { lyricScale = if (lyricScale >= 1.4f) 1f else lyricScale + 0.2f },
                         onSeek = { vm.player.seekTo(it) },
-                        onLink = { linkOpen = true },
-                        onUnlink = { vm.unlinkLyrics(track.id) { lyricNonce++ } },
                         modifier = Modifier.weight(1f).padding(top = 10.dp),
                     )
                 } else {
@@ -380,6 +378,16 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                                 text = { Text(stringResource(R.string.menu_add_playlist)) },
                                 onClick = { moreMenu = false; addToPlaylist = true },
                             )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.lyrics_link)) },
+                                onClick = { moreMenu = false; linkOpen = true },
+                            )
+                            if (sheet.linked) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.lyrics_unlink)) },
+                                    onClick = { moreMenu = false; vm.unlinkLyrics(track.id) { lyricNonce++ } },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.player_sleep)) },
                                 onClick = { moreMenu = false; sleep = true },
@@ -612,8 +620,6 @@ private fun LyricsView(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onScale: () -> Unit,
     onSeek: (Long) -> Unit,
-    onLink: () -> Unit,
-    onUnlink: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
@@ -666,19 +672,6 @@ private fun LyricsView(
                         }
                     }
                 }
-            }
-        }
-        Row {
-            PlayerPill(
-                text = stringResource(R.string.lyrics_link),
-                onClick = onLink,
-                modifier = Modifier.padding(end = 8.dp),
-            )
-            if (sheet.linked) {
-                PlayerPill(
-                    text = stringResource(R.string.lyrics_unlink),
-                    onClick = onUnlink,
-                )
             }
         }
     }
