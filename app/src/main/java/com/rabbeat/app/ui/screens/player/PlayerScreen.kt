@@ -239,7 +239,15 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                             .padding(top = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Artwork(track.artworkUri, track.title, Modifier.size(56.dp), 8.dp)
+                        Artwork(
+                            track.artworkUri,
+                            track.title,
+                            Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { lyrics = false },
+                            8.dp,
+                        )
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -293,7 +301,11 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                                     scaleX = scale
                                     scaleY = scale
                                 }
-                                .shadow(24.dp, RoundedCornerShape(12.dp), clip = false),
+                                .shadow(24.dp, RoundedCornerShape(12.dp), clip = false)
+                                .clickable(
+                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                    indication = null,
+                                ) { lyrics = true },
                             12.dp,
                         )
                     }
