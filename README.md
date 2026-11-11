@@ -38,13 +38,6 @@
 gradlew.bat :app:assembleDebug
 ```
 
-Debug APK：`app/build/outputs/apk/debug/app-debug.apk`。安装到 API 26 及以上的设备或模拟器。首次启动会进入引导页。
-
-演示数据有两条路：
-
-- 引导页或设置里的「扫描本机」会读取系统媒体库里的音频。曲库只保留本机来源。
-- Debug 包里点「注入演示数据」，会写入一套本机演示曲。
-
 ## 里程碑
 
 - **M0** 主题、类型安全导航、底部四个 Tab、Mini Player、Hilt 入口。
@@ -82,3 +75,7 @@ Debug APK：`app/build/outputs/apk/debug/app-debug.apk`。安装到 API 26 及�
 - 设备离线时曲库只保留可离线曲目。
 - 尚未在真机上跑过播放和通知，只确认 `assembleDebug` 通过。
 - 背景模糊在 Android 11 及以下不生效，仅保留渐变遮罩。
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
