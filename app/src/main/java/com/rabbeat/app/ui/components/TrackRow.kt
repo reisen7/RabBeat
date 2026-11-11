@@ -86,6 +86,7 @@ fun TrackRow(
     onRemove: (() -> Unit)? = null,
     playing: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    showMenu: Boolean = true,
 ) {
     var menu by remember(track.id) { mutableStateOf(false) }
     val accent = LocalAccentPalette.current
@@ -148,7 +149,8 @@ fun TrackRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Box {
+            if (showMenu) {
+                Box {
                 IconButton(onClick = { menu = true }, modifier = Modifier.size(38.dp)) {
                     Icon(
                         Icons.Filled.MoreHoriz,
@@ -157,7 +159,7 @@ fun TrackRow(
                         modifier = Modifier.size(20.dp),
                     )
                 }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenu(expanded = menu && showMenu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_play_next)) }, onClick = { menu = false; onPlayNext() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_enqueue)) }, onClick = { menu = false; onEnqueue() })
                     DropdownMenuItem(
@@ -175,6 +177,7 @@ fun TrackRow(
                     ) {
                         DropdownMenuItem(text = { Text(stringResource(R.string.menu_download)) }, onClick = { menu = false; onDownload() })
                     }
+                }
                 }
             }
         }

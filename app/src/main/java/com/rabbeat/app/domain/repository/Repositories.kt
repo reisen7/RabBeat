@@ -108,6 +108,7 @@ interface PlaylistRepository {
     suspend fun reorder(orderedIds: List<String>)
     suspend fun addTracks(playlistId: String, trackIds: List<String>, atStart: Boolean = false)
     suspend fun removeTrack(playlistId: String, trackId: String)
+    suspend fun removeTracks(playlistId: String, trackIds: List<String>)
     suspend fun reorderTracks(playlistId: String, orderedTrackIds: List<String>)
     suspend fun saveQueue(name: String, trackIds: List<String>)
 }

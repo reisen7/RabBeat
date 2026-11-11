@@ -123,6 +123,16 @@ class PlaylistRepositoryImpl @Inject constructor(
         if (playlistId == LikedPlaylist.ID) likedPlaylist.onAdded(fresh)
     }
 
+    override suspend fun removeTracks(playlistId: String, trackIds: List<String>) {
+        val ids = trackIds.distinct()
+        if (ids.isEmpty()) return
+        database.withTransaction {
+            ids.chunked(400).forEach { playlistDao.removeTracksIn(playlistId, it) }
+            playlistDao.touch(playlistId, System.currentTimeMillis())
+        }
+        if (playlistId == LikedPlaylist.ID) ids.forEach { likedPlaylist.onRemoved(it) }
+    }
+
     override suspend fun reorderTracks(playlistId: String, orderedTrackIds: List<String>) {
         database.withTransaction {
             val existing = playlistDao.refs(playlistId).map { it.trackId }

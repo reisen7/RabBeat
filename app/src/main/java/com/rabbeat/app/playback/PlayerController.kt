@@ -218,16 +218,19 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun playNext(track: Track) {
+    fun playNext(track: Track) = playNext(listOf(track))
+
+    fun playNext(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
         warmUp()
         val exo = player ?: return
         if (exo.mediaItemCount == 0) {
-            playQueue(listOf(track), 0)
+            playQueue(tracks, 0)
             return
         }
         val at = (exo.currentMediaItemIndex + 1).coerceAtMost(exo.mediaItemCount)
-        exo.addMediaItem(at, mediaItemFactory.create(track))
-        queue = queue.toMutableList().also { it.add(at.coerceAtMost(it.size), track) }
+        exo.addMediaItems(at, tracks.map { mediaItemFactory.create(it) })
+        queue = queue.toMutableList().also { it.addAll(at.coerceAtMost(it.size), tracks) }
         publish(exo.isPlaying, exo.currentPosition)
     }
 

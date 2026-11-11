@@ -32,6 +32,21 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+data class FolderImportResult(
+    val summary: SyncSummary,
+    val folderName: String,
+    val trackIds: List<String>,
+)
+
+internal fun finalTrackIds(
+    rowIds: List<String>,
+    keptIds: Set<String>,
+    replaced: Map<String, String>,
+): List<String> = rowIds
+    .map { id -> if (id in keptIds) id else replaced[id] }
+    .filterNotNull()
+    .distinct()
+
 @Singleton
 class FolderLibraryImporter @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -42,11 +57,16 @@ class FolderLibraryImporter @Inject constructor(
     private val netease: NeteaseReconciler,
 ) {
     suspend fun importTree(tree: Uri): SyncSummary = withContext(Dispatchers.IO) {
+        importTreeForPlaylist(tree).summary
+    }
+
+    suspend fun importTreeForPlaylist(tree: Uri): FolderImportResult = withContext(Dispatchers.IO) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
         runCatching { context.contentResolver.takePersistableUriPermission(tree, flags) }
         val sourceId = sourceId(tree)
         val name = folderName(tree)
-        write(sourceId, name, tree)
+        val result = write(sourceId, name, tree)
+        FolderImportResult(result.summary, name, result.trackIds)
     }
 
     suspend fun rescanSaved(): SyncSummary = withContext(Dispatchers.IO) {
@@ -56,7 +76,7 @@ class FolderLibraryImporter @Inject constructor(
         var missing = 0
         folders.forEach { source ->
             val root = runCatching { json.decodeFromString(FolderConfig.serializer(), source.configJson).root }.getOrNull() ?: return@forEach
-            val summary = write(source.id, source.displayName, Uri.parse(root))
+            val summary = write(source.id, source.displayName, Uri.parse(root)).summary
             tracks += summary.trackCount
             albums += summary.albumCount
             missing += summary.missingMetadata
@@ -64,16 +84,19 @@ class FolderLibraryImporter @Inject constructor(
         SyncSummary(tracks, albums, missing)
     }
 
-    private suspend fun write(sourceId: String, name: String, tree: Uri): SyncSummary {
-        val root = DocumentFile.fromTreeUri(context, tree) ?: return SyncSummary(0, 0, 0)
+    private data class WriteResult(val summary: SyncSummary, val trackIds: List<String>)
+
+    private suspend fun write(sourceId: String, name: String, tree: Uri): WriteResult {
+        val root = DocumentFile.fromTreeUri(context, tree) ?: return WriteResult(SyncSummary(0, 0, 0), emptyList())
         val filters = settings.scanSettings.first()
         val audio = mutableListOf<FoundAudio>()
         val lrcs = linkedMapOf<String, Uri>()
         val rootName = root.name?.trim().orEmpty().ifBlank { folderName(tree) }
         walk(root, rootName, filters, audio, lrcs)
+        audio.sortWith(compareBy({ it.folder.lowercase() }, { (it.file.name ?: "").lowercase() }))
         val now = System.currentTimeMillis()
             val rows = audio.mapNotNull { file -> readFile(sourceId, file, lrcs, filters, now) }
-        val summary = database.withTransaction {
+        val result = database.withTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(sourceId).associateBy { it.id }
             val others = trackDao.getOtherSources(sourceId)
@@ -155,14 +178,17 @@ class FolderLibraryImporter @Inject constructor(
             }
             albums.chunked(200).forEach { database.albumDao().upsertAll(it) }
             artists.chunked(200).forEach { database.artistDao().upsertAll(it) }
-            SyncSummary(
-                trackCount = kept.size,
-                albumCount = kept.map { it.entity.albumId }.distinct().size,
-                missingMetadata = kept.count { it.entity.artworkUri == null || it.entity.year == null },
+            WriteResult(
+                SyncSummary(
+                    trackCount = kept.size,
+                    albumCount = kept.map { it.entity.albumId }.distinct().size,
+                    missingMetadata = kept.count { it.entity.artworkUri == null || it.entity.year == null },
+                ),
+                finalTrackIds(rows.map { it.entity.id }, plan.keptIds, plan.replaced),
             )
         }
         netease.reconcile()
-        return summary
+        return result
     }
 
     private fun walk(

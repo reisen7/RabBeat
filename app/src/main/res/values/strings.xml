@@ -262,6 +262,15 @@
     <string name="playlist_sort_order">歌单顺序</string>
     <string name="copied">已复制「%1$s」</string>
     <string name="playlist_drag_hint">切换到「歌单顺序」并清空搜索后才能拖动排序</string>
+    <string name="action_import_folder">从文件夹导入</string>
+    <string name="action_multi_select">多选</string>
+    <string name="selected_count">已选择 %1$d 首</string>
+    <string name="folder_imported">已从「%1$s」导入 %2$d 首</string>
+    <string name="folder_import_failed">导入失败</string>
+    <string name="toast_play_next_multi">已加入下一首播放 %1$d 首</string>
+    <string name="playlist_added_multi">已添加 %1$d 首到「%2$s」</string>
+    <string name="playlist_remove_tracks_title">从歌单删除 %1$d 首歌？</string>
+    <string name="playlist_remove_tracks_body">歌曲文件不会被删除。</string>
     <string name="playlist_sort_artist">按歌手</string>
     <string name="playlist_sort_album">按专辑</string>
     <string name="library_playlists">歌单</string>
