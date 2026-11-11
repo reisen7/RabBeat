@@ -2,6 +2,7 @@ package com.rabbeat.app.ui.screens.library
 
 import android.Manifest
 import android.os.Build
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -35,12 +36,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Switch
@@ -217,6 +220,11 @@ class LibraryViewModel @Inject constructor(
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }
     fun download(id: String) { viewModelScope.launch { downloads.enqueue(listOf(id)) } }
     fun hide(id: String) { viewModelScope.launch { music.hide(listOf(id)) } }
+    fun hideFolder(path: String) {
+        viewModelScope.launch {
+            music.hide(music.trackIds(TrackQuery(folderPath = path, folderRecursive = true)))
+        }
+    }
     fun importDevice(onDone: (Int) -> Unit) {
         viewModelScope.launch {
             if (!scanner.hasAudioPermission()) {
@@ -547,6 +555,7 @@ private fun LibraryBody(
 
 @Composable
 private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var open by remember { mutableStateOf<String?>(null) }
     val current = open
     if (current != null) {
@@ -595,12 +604,14 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
     } else {
         LazyColumn(contentPadding = PaddingValues(top = 4.dp, bottom = 30.dp)) {
             items(folders, key = { it.path }) { group ->
+                var folderMenu by remember(group.path) { mutableStateOf(false) }
+                var confirmHide by remember(group.path) { mutableStateOf(false) }
                 Column {
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .clickable { open = group.path }
-                            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+                            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
@@ -618,6 +629,53 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        Box {
+                            IconButton(onClick = { folderMenu = true }, modifier = Modifier.size(38.dp)) {
+                                Icon(
+                                    Icons.Filled.MoreHoriz,
+                                    contentDescription = stringResource(R.string.cd_more),
+                                    tint = LocalRabBeatPalette.current.secondaryLabel,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            DropdownMenu(expanded = folderMenu, onDismissRequest = { folderMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.menu_hide_folder)) },
+                                    onClick = { folderMenu = false; confirmHide = true },
+                                )
+                            }
+                        }
+                    }
+                    if (confirmHide) {
+                        AlertDialog(
+                            onDismissRequest = { confirmHide = false },
+                            title = { Text(stringResource(R.string.hide_folder_dialog_title)) },
+                            text = {
+                                Text(
+                                    stringResource(
+                                        R.string.hide_folder_dialog_body,
+                                        group.path,
+                                        group.trackCount,
+                                    ),
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    confirmHide = false
+                                    vm.hideFolder(group.path)
+                                    Toast.makeText(
+                                        context,
+                                        R.string.hidden_toast,
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }) { Text(stringResource(R.string.hide_dialog_confirm)) }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { confirmHide = false }) {
+                                    Text(stringResource(R.string.action_cancel))
+                                }
+                            },
+                        )
                     }
                     Box(
                         Modifier

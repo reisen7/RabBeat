@@ -53,6 +53,13 @@ class TrackQuerySqlTest {
     }
 
     @Test
+    fun folderRecursiveIncludesChildren() {
+        val q = TrackQuerySql.select(TrackQuery(folderPath = "Music", folderRecursive = true))
+        assertTrue(q.text().contains("LIKE ? || '/%'"))
+        assertEquals(listOf("Music", "Music"), args(q))
+    }
+
+    @Test
     fun limitAndOffsetWrapInSubquery() {
         val q = TrackQuerySql.select(TrackQuery(sort = TrackSort.ADDED), limit = 500, offset = 7)
         assertEquals(

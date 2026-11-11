@@ -248,6 +248,9 @@
     <string name="hidden_restore">恢复</string>
     <string name="hidden_restore_all">全部恢复</string>
     <string name="hidden_track_subtitle">%1$d 首</string>
+    <string name="menu_hide_folder">隐藏这个文件夹</string>
+    <string name="hide_folder_dialog_title">隐藏这个文件夹？</string>
+    <string name="hide_folder_dialog_body">「%1$s」里的 %2$d 首歌（含子文件夹）会从曲库、歌单和搜索中消失，本机文件不会被删除。可以在「设置 → 已隐藏的歌曲」里恢复。</string>
     <string name="playlist_add">添加到歌单</string>
     <string name="playlist_added">已添加到「%1$s」</string>
     <string name="playlist_count">%1$d 首歌曲</string>

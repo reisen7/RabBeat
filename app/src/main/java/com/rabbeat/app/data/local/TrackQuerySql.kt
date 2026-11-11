@@ -20,8 +20,14 @@ internal object TrackQuerySql {
             clauses += "(origin != 'REMOTE' OR downloadState = 'DOWNLOADED')"
         }
         query.folderPath?.let {
-            clauses += "$FOLDER_EXPR = ?"
-            args += it
+            if (query.folderRecursive) {
+                clauses += "($FOLDER_EXPR = ? OR $FOLDER_EXPR LIKE ? || '/%')"
+                args += it
+                args += it
+            } else {
+                clauses += "$FOLDER_EXPR = ?"
+                args += it
+            }
         }
         return (if (clauses.isEmpty()) "" else " WHERE ${clauses.joinToString(" AND ")}") to args
     }
