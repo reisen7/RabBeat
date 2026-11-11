@@ -62,7 +62,7 @@ fun MiniPlayerBar(
                 spotColor = Color.Black.copy(alpha = 0.15f),
             )
             .clip(RoundedCornerShape(14.dp))
-            .background(adaptiveSurface(palette.elevated))
+            .background(adaptiveSurface(palette.elevated, 0.92f))
             .clickable(onClick = onOpen),
     ) {
         Row(

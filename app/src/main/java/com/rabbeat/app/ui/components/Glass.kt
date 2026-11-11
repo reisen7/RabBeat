@@ -60,10 +60,17 @@ import androidx.compose.ui.unit.sp
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 
-/** Elevated surfaces go slightly translucent while a custom background image is visible. */
+/**
+ * Surfaces turn into frosted glass while a custom background image is visible. Pass [alpha]
+ * to keep the surface's own colour instead (for controls floating over scrolling content).
+ */
 @Composable
-fun adaptiveSurface(color: Color, alpha: Float = 0.92f): Color =
-    if (LocalHasBackgroundImage.current) color.copy(alpha = alpha) else color
+fun adaptiveSurface(color: Color, alpha: Float? = null): Color = when {
+    !LocalHasBackgroundImage.current -> color
+    alpha != null -> color.copy(alpha = alpha)
+    LocalRabBeatPalette.current.isDark -> Color.White.copy(alpha = 0.12f)
+    else -> Color.White.copy(alpha = 0.55f)
+}
 
 @Composable
 fun groupedPageBackground(): Color =
