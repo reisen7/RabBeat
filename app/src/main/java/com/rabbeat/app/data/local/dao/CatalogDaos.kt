@@ -129,6 +129,19 @@ interface PlaylistDao {
 
     data class PlaylistVisibleCount(val playlistId: String, val trackCount: Int)
 
+    @Query(
+        "SELECT p.id AS playlistId, (" +
+            "SELECT t.artworkUri FROM playlist_tracks pt JOIN tracks t ON t.id = pt.trackId " +
+            "WHERE pt.playlistId = p.id AND t.hidden = 0 AND t.artworkUri IS NOT NULL AND t.artworkUri != '' " +
+            "ORDER BY pt.addedAt DESC, pt.position DESC LIMIT 1) AS artworkUri FROM playlists p",
+    )
+    fun observeLatestArtwork(): Flow<List<PlaylistLatestArtwork>>
+
+    data class PlaylistLatestArtwork(val playlistId: String, val artworkUri: String?)
+
+    @Query("UPDATE playlists SET coverUri = :coverUri WHERE id = :id")
+    suspend fun setCover(id: String, coverUri: String?)
+
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     fun observeRefs(playlistId: String): Flow<List<PlaylistTrackCrossRef>>
 

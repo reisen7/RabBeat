@@ -1,8 +1,6 @@
 package com.rabbeat.app.data.mock
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.rabbeat.app.data.local.dao.TrackDao
@@ -10,7 +8,6 @@ import com.rabbeat.app.domain.model.DownloadItem
 import com.rabbeat.app.domain.model.DownloadState
 import com.rabbeat.app.domain.model.TrackOrigin
 import com.rabbeat.app.domain.repository.DownloadRepository
-import com.rabbeat.app.domain.repository.SettingsRepository
 import com.rabbeat.app.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -28,7 +25,6 @@ import kotlinx.coroutines.launch
 class MockDownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val trackDao: TrackDao,
-    private val settingsRepository: SettingsRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) : DownloadRepository {
     private val progress = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -60,15 +56,9 @@ class MockDownloadRepository @Inject constructor(
     }
 
     override suspend fun enqueue(trackIds: List<String>) {
-        val wifiOnly = settingsRepository.wifiOnlyDownloads.first()
-        val onWifi = isOnWifi()
         trackIds.forEach { id ->
             val current = trackDao.get(id) ?: return@forEach
             if (current.origin == TrackOrigin.LOCAL || current.downloadState == DownloadState.DOWNLOADED) return@forEach
-            if (wifiOnly && !onWifi) {
-                trackDao.updateDownloadState(id, DownloadState.QUEUED)
-                return@forEach
-            }
             trackDao.updateDownloadState(id, DownloadState.QUEUED)
             scope.launch { runFakeDownload(id) }
         }
@@ -104,14 +94,6 @@ class MockDownloadRepository @Inject constructor(
         trackDao.updateDownloadState(id, DownloadState.DOWNLOADED)
         trackDao.updateOrigin(id, TrackOrigin.CACHED)
         progress.update { it - id }
-    }
-
-    private fun isOnWifi(): Boolean {
-        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return true
-        val network = manager.activeNetwork ?: return false
-        val caps = manager.getNetworkCapabilities(network) ?: return false
-        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
     private fun stateOrder(state: DownloadState): Int = when (state) {

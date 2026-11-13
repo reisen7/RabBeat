@@ -2,6 +2,7 @@ package com.rabbeat.app.ui.screens.player
 
 import android.widget.Toast
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -46,6 +47,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -115,17 +117,14 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch { player.state.value.currentTrack?.let { favorites(it.id) } }
     }
     suspend fun loadLyrics(trackId: String) = lyrics.load(trackId)
-    fun linkLyrics(trackId: String, sourceId: String, onDone: () -> Unit) {
-        viewModelScope.launch {
-            lyrics.link(trackId, sourceId)
-            onDone()
-        }
+    fun fetchOnlineLyrics(trackId: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch { onDone(lyrics.fetchOnline(trackId)) }
     }
-    fun unlinkLyrics(trackId: String, onDone: () -> Unit) {
-        viewModelScope.launch {
-            lyrics.unlink(trackId)
-            onDone()
-        }
+    fun importLyrics(trackId: String, uri: android.net.Uri, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch { onDone(lyrics.importLocal(trackId, uri)) }
+    }
+    fun setLyricOffset(trackId: String, offsetMs: Long) {
+        viewModelScope.launch { lyrics.setOffset(trackId, offsetMs) }
     }
 }
 
@@ -143,10 +142,18 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     var speed by remember { mutableStateOf(false) }
     var moreMenu by remember { mutableStateOf(false) }
     var addToPlaylist by remember { mutableStateOf(false) }
-    var linkOpen by remember { mutableStateOf(false) }
-    var lyricQuery by remember { mutableStateOf("") }
+    var lyricMatching by remember { mutableStateOf(false) }
+    var offsetDialog by remember { mutableStateOf(false) }
     var lyricScale by remember { mutableFloatStateOf(1f) }
     var lyricNonce by remember { mutableIntStateOf(0) }
+    val pickLyric = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        val id = track?.id
+        if (uri != null && id != null) {
+            vm.importLyrics(id, uri) { ok -> if (ok) lyricNonce++ }
+        }
+    }
     var sheet by remember(track?.id) { mutableStateOf(LyricSheet.EMPTY) }
     var lyricReady by remember(track?.id) { mutableStateOf(false) }
     LaunchedEffect(track?.id, lyricNonce) {
@@ -156,7 +163,7 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
         lyricReady = true
     }
     val lyricState = rememberLazyListState()
-    val activeLine = if (sheet.synced) sheet.lines.indexOfLast { state.positionMs >= it.timeMs }.coerceAtLeast(0) else -1
+    val activeLine = if (sheet.synced) sheet.lines.indexOfLast { state.positionMs >= it.timeMs + sheet.offsetMs }.coerceAtLeast(0) else -1
     LaunchedEffect(activeLine, lyrics) {
         if (lyrics && activeLine >= 0 && !lyricState.isScrollInProgress) {
             lyricState.animateScrollToItem((activeLine - 2).coerceAtLeast(0))
@@ -270,11 +277,16 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                     }
                     LyricsView(
                         sheet = sheet,
-                        ready = lyricReady,
+                        ready = lyricReady && !lyricMatching,
                         activeLine = activeLine,
                         scale = lyricScale,
                         listState = lyricState,
-                        onSeek = { vm.player.seekTo(it) },
+                        onSeek = { vm.player.seekTo(it + sheet.offsetMs) },
+                        onFetch = {
+                            lyricMatching = true
+                            vm.fetchOnlineLyrics(track.id) { lyricMatching = false; if (it) lyricNonce++ }
+                        },
+                        onImport = { pickLyric.launch(arrayOf("*/*")) },
                         modifier = Modifier.weight(1f).padding(top = 10.dp),
                     )
                 } else {
@@ -378,19 +390,25 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                                 onClick = { moreMenu = false; addToPlaylist = true },
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.lyrics_link)) },
-                                onClick = { moreMenu = false; linkOpen = true },
+                                text = { Text(stringResource(R.string.lyrics_fetch)) },
+                                onClick = {
+                                    moreMenu = false
+                                    lyricMatching = true
+                                    vm.fetchOnlineLyrics(track.id) { lyricMatching = false; if (it) lyricNonce++ }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.lyrics_import)) },
+                                onClick = { moreMenu = false; pickLyric.launch(arrayOf("*/*")) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.lyrics_offset)) },
+                                onClick = { moreMenu = false; offsetDialog = true },
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.lyrics_size)) },
                                 onClick = { moreMenu = false; lyricScale = if (lyricScale >= 1.4f) 1f else lyricScale + 0.2f },
                             )
-                            if (sheet.linked) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.lyrics_unlink)) },
-                                    onClick = { moreMenu = false; vm.unlinkLyrics(track.id) { lyricNonce++ } },
-                                )
-                            }
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.player_sleep)) },
                                 onClick = { moreMenu = false; sleep = true },
@@ -562,30 +580,52 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     if (addToPlaylist && track != null) {
         com.rabbeat.app.ui.components.AddToPlaylistDialog(track.id) { addToPlaylist = false }
     }
-    if (linkOpen && track != null) {
-        val catalog by vm.catalog.collectAsStateWithLifecycle()
-        val picks = catalog.filter {
-            lyricQuery.isBlank() || it.title.contains(lyricQuery, true) || it.artist.contains(lyricQuery, true)
-        }.take(40)
+    if (offsetDialog && track != null) {
+        val trackId = track.id
         AlertDialog(
-            onDismissRequest = { linkOpen = false },
-            title = { Text(stringResource(R.string.lyrics_pick)) },
+            onDismissRequest = { offsetDialog = false },
+            title = { Text(stringResource(R.string.lyrics_offset)) },
             text = {
-                Column {
-                    OutlinedTextField(value = lyricQuery, onValueChange = { lyricQuery = it }, singleLine = true)
-                    LazyColumn(Modifier.height(280.dp)) {
-                        itemsIndexed(picks) { _, item ->
-                            TextButton(onClick = {
-                                vm.linkLyrics(track.id, item.id) {
-                                    linkOpen = false
-                                    lyricNonce++
-                                }
-                            }) { Text("${item.title} · ${item.artist}") }
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "%+.2fs".format(sheet.offsetMs / 1000f),
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                    Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(-1000L to "-1s", -500L to "-0.5s", -100L to "-0.1s").forEach { (step, label) ->
+                            OutlinedButton(onClick = {
+                                val next = sheet.offsetMs + step
+                                sheet = sheet.copy(offsetMs = next)
+                                vm.setLyricOffset(trackId, next)
+                            }) { Text(label) }
                         }
                     }
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(100L to "+0.1s", 500L to "+0.5s", 1000L to "+1s").forEach { (step, label) ->
+                            OutlinedButton(onClick = {
+                                val next = sheet.offsetMs + step
+                                sheet = sheet.copy(offsetMs = next)
+                                vm.setLyricOffset(trackId, next)
+                            }) { Text(label) }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.lyrics_offset_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
                 }
             },
-            confirmButton = { TextButton(onClick = { linkOpen = false }) { Text(stringResource(R.string.action_cancel)) } },
+            confirmButton = {
+                TextButton(onClick = {
+                    sheet = sheet.copy(offsetMs = 0)
+                    vm.setLyricOffset(trackId, 0)
+                }) { Text(stringResource(R.string.lyrics_offset_reset)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { offsetDialog = false }) { Text(stringResource(R.string.action_done)) }
+            },
         )
     }
 }
@@ -622,26 +662,33 @@ private fun LyricsView(
     scale: Float,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onSeek: (Long) -> Unit,
+    onFetch: () -> Unit,
+    onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier) {
-        if (sheet.linked) {
-            Text(
-                stringResource(R.string.lyrics_linked),
-                color = Color.White.copy(alpha = 0.55f),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
         when {
             !ready -> {
                 LoadingState(Modifier.fillMaxWidth().weight(1f))
             }
             sheet.lines.isEmpty() -> {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Column(
+                    Modifier.fillMaxWidth().weight(1f),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     Text(
                         stringResource(R.string.lyrics_empty),
                         color = Color.White.copy(alpha = 0.62f),
                     )
+                    Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        TextButton(onClick = onFetch) {
+                            Text(stringResource(R.string.lyrics_fetch), color = Color.White.copy(alpha = 0.85f))
+                        }
+                        TextButton(onClick = onImport) {
+                            Text(stringResource(R.string.lyrics_import), color = Color.White.copy(alpha = 0.85f))
+                        }
+                    }
                 }
             }
             else -> LazyColumn(

@@ -34,6 +34,7 @@ data class PlaylistEntity(
     val createdAt: Long,
     val updatedAt: Long,
     @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
+    val coverUri: String? = null,
 )
 
 @Entity(tableName = "playlist_tracks", primaryKeys = ["playlistId", "trackId"])

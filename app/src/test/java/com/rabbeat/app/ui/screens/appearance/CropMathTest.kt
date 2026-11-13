@@ -54,6 +54,20 @@ class CropMathTest {
     }
 
     @Test
+    fun outputSizeSquareCapsAtMaxEdge() {
+        val size = outputSize(1f, 1024)
+        assertEquals(1024, size.width)
+        assertEquals(1024, size.height)
+    }
+
+    @Test
+    fun outputSizeTallAspectKeepsRatio() {
+        val size = outputSize(9f / 20f, 2400)
+        assertEquals(1080, size.width)
+        assertEquals(2400, size.height)
+    }
+
+    @Test
     fun offsetShiftsCropRect() {
         val rect = cropRect(4000f, 1000f, 1000f, 2000f, scale = 2f, offset = Offset(700f, 0f))
         assertEquals(1400f, rect.left, 1e-3f)

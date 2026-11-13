@@ -75,12 +75,6 @@ class SettingsRepositoryImpl @Inject constructor(
         context.settingsDataStore.edit { it[Keys.CARD_OPACITY] = opacity.coerceIn(0f, 1f) }
     }
 
-    override val onboardingDone: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.ONBOARDING] ?: false }
-
-    override suspend fun setOnboardingDone(done: Boolean) {
-        context.settingsDataStore.edit { it[Keys.ONBOARDING] = done }
-    }
-
     override val recentSearches: Flow<List<String>> = context.settingsDataStore.data.map { prefs ->
         prefs[Keys.RECENT]?.let { raw ->
             runCatching { json.decodeFromString(ListSerializer(String.serializer()), raw) }.getOrDefault(emptyList())
@@ -113,14 +107,9 @@ class SettingsRepositoryImpl @Inject constructor(
         context.settingsDataStore.edit { it[Keys.SLEEP_FADE] = enabled }
     }
 
-    override val wifiOnlyDownloads: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.WIFI_ONLY] ?: false }
-    override suspend fun setWifiOnlyDownloads(enabled: Boolean) {
-        context.settingsDataStore.edit { it[Keys.WIFI_ONLY] = enabled }
-    }
-
-    override val autoOfflineFavorites: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.AUTO_OFFLINE] ?: false }
-    override suspend fun setAutoOfflineFavorites(enabled: Boolean) {
-        context.settingsDataStore.edit { it[Keys.AUTO_OFFLINE] = enabled }
+    override val cellularOnlineCache: Flow<Boolean> = context.settingsDataStore.data.map { it[Keys.CELLULAR_CACHE] ?: true }
+    override suspend fun setCellularOnlineCache(enabled: Boolean) {
+        context.settingsDataStore.edit { it[Keys.CELLULAR_CACHE] = enabled }
     }
 
     override val scanSettings: Flow<ScanSettings> = context.settingsDataStore.data.map { it.toScanSettings() }
@@ -154,12 +143,10 @@ class SettingsRepositoryImpl @Inject constructor(
         val BACKGROUND_BLUR = floatPreferencesKey("background_blur")
         val BACKGROUND_DIM = floatPreferencesKey("background_dim")
         val CARD_OPACITY = floatPreferencesKey("card_opacity")
-        val ONBOARDING = booleanPreferencesKey("onboarding_done")
         val RECENT = stringPreferencesKey("recent_searches")
         val SLEEP_MINUTES = intPreferencesKey("sleep_minutes")
         val SLEEP_FADE = booleanPreferencesKey("sleep_fade")
-        val WIFI_ONLY = booleanPreferencesKey("wifi_only")
-        val AUTO_OFFLINE = booleanPreferencesKey("auto_offline")
+        val CELLULAR_CACHE = booleanPreferencesKey("cellular_cache")
         val SCAN_FILTER_NON_SONG = booleanPreferencesKey("scan_filter_non_song")
         val SCAN_SKIP_SMALL = booleanPreferencesKey("scan_skip_small")
         val SCAN_MIN_KB = intPreferencesKey("scan_min_kb")

@@ -49,6 +49,25 @@ data class NePrivilege(
 )
 
 @Serializable
+data class NeSearchResponse(
+    val result: NeSearchResult? = null,
+)
+
+@Serializable
+data class NeSearchResult(
+    val songs: List<NeSearchSong> = emptyList(),
+)
+
+@Serializable
+data class NeSearchSong(
+    val id: Long,
+    val name: String = "",
+    val artists: List<NeArtist> = emptyList(),
+    val album: NeAlbum = NeAlbum(),
+    val duration: Long = 0,
+)
+
+@Serializable
 data class NeLyricResponse(
     val lrc: NeLrc? = null,
     val tlyric: NeLrc? = null,

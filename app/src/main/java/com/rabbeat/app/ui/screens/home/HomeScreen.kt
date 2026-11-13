@@ -1,5 +1,6 @@
 package com.rabbeat.app.ui.screens.home
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +48,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.size.Scale
 import com.rabbeat.app.R
 import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.usecase.HomeContent
@@ -70,7 +74,12 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.util.ArtworkColorCache
 import com.rabbeat.app.util.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
@@ -78,32 +87,86 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class NowPlaying(val track: Track?, val playing: Boolean)
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     observeHome: ObserveHomeUseCase,
     network: NetworkStatus,
     val player: PlayerController,
     val colors: ArtworkColorCache,
+    @ApplicationContext private val appContext: Context,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: com.rabbeat.app.domain.repository.DownloadRepository,
     private val music: com.rabbeat.app.domain.repository.MusicRepository,
+    private val logger: com.rabbeat.app.util.AppLogger,
 ) : ViewModel() {
+    private var homeLogged = false
     val nowPlaying = player.state
         .map { NowPlaying(it.currentTrack, it.isPlaying) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NowPlaying(null, false))
     val offline = network.online.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
     val content = observeHome()
-        .combine(network.online) { home, online ->
-            if (home.totalTracks == 0 && home.sources.isEmpty()) ScreenState.Empty
-            else ScreenState.Ready(home to online)
+        .combine(network.online) { home, online -> home to online }
+        .transformLatest { (home, online) ->
+            if (home.totalTracks == 0 && home.sources.isEmpty()) {
+                emit(ScreenState.Empty)
+            } else {
+                if (!homeLogged) {
+                    homeLogged = true
+                    logger.d("Home", "ready tracks=${home.totalTracks} sources=${home.sources.size}")
+                }
+                // Render as soon as data lands — a blank gate reads as a freeze.
+                emit(ScreenState.Ready(home to online))
+                // Warm the artwork cache right after, so first scrolls decode nothing.
+                prefetchArtwork(home)
+            }
         }
-        .catch { emit(ScreenState.Failed) }
+        .catch { error ->
+            logger.e("Home", "observe failed", error)
+            emit(ScreenState.Failed)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScreenState.Loading)
+
+    /**
+     * Decodes covers at the exact pixel size each slot renders, so the later
+     * AsyncImage calls hit the memory cache instead of decoding mid-scroll.
+     */
+    private suspend fun prefetchArtwork(home: HomeContent) {
+        val density = appContext.resources.displayMetrics.density
+        val loader = SingletonImageLoader.get(appContext)
+        val specs = listOf(
+            150 to home.recent.mapNotNull(Track::artworkUri),
+            96 to listOfNotNull(player.state.value.currentTrack?.artworkUri),
+            48 to home.top.mapNotNull(Track::artworkUri),
+        )
+        withTimeoutOrNull(800) {
+            coroutineScope {
+                specs.forEach { (dp, uris) ->
+                    val px = (dp * density).roundToInt()
+                    uris.distinct().forEach { uri ->
+                        launch(Dispatchers.IO) {
+                            runCatching {
+                                loader.execute(
+                                    ImageRequest.Builder(appContext)
+                                        .data(uri)
+                                        .size(px, px)
+                                        .scale(Scale.FILL)
+                                        .build(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fun play(tracks: List<Track>, index: Int) = player.playQueue(tracks, index)
     fun favorite(id: String) { viewModelScope.launch { favorites(id) } }

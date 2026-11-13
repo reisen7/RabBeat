@@ -65,20 +65,22 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class DownloadPage(val items: List<DownloadItem>, val wifiOnly: Boolean, val auto: Boolean)
+data class DownloadPage(val items: List<DownloadItem>, val cellCache: Boolean)
 
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
 ) : ViewModel() {
-    val page = combine(downloads.observeDownloads(), settings.wifiOnlyDownloads, settings.autoOfflineFavorites) { items, wifi, auto ->
-        ScreenState.Ready(DownloadPage(items, wifi, auto)) as ScreenState<DownloadPage>
+    val page = combine(
+        downloads.observeDownloads(),
+        settings.cellularOnlineCache,
+    ) { items, cell ->
+        ScreenState.Ready(DownloadPage(items, cell)) as ScreenState<DownloadPage>
     }.catch { emit(ScreenState.Failed) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScreenState.Loading)
 
-    fun setWifi(value: Boolean) { viewModelScope.launch { settings.setWifiOnlyDownloads(value) } }
-    fun setAuto(value: Boolean) { viewModelScope.launch { settings.setAutoOfflineFavorites(value) } }
+    fun setCellCache(value: Boolean) { viewModelScope.launch { settings.setCellularOnlineCache(value) } }
     fun clear() { viewModelScope.launch { downloads.clearCompleted() } }
 }
 
@@ -157,9 +159,8 @@ private fun DownloadBody(page: DownloadPage, vm: DownloadsViewModel, modifier: M
                         )
                     }
                     GlassPill(
-                        text = if (page.wifiOnly) "Wi-Fi" else stringResource(R.string.downloads_network_any),
+                        text = stringResource(R.string.downloads_network_any),
                         icon = Icons.Filled.CloudDownload,
-                        active = page.wifiOnly,
                     )
                 }
             }
@@ -169,38 +170,17 @@ private fun DownloadBody(page: DownloadPage, vm: DownloadsViewModel, modifier: M
             GlassGroup(Modifier.padding(horizontal = 16.dp)) {
                 SettingRow(
                     icon = Icons.Filled.CloudDownload,
-                    iconColor = androidx.compose.ui.graphics.Color(0xFF007AFF),
-                    title = stringResource(R.string.downloads_wifi),
-                    subtitle = stringResource(R.string.downloads_wifi_body),
+                    iconColor = androidx.compose.ui.graphics.Color(0xFFFF9500),
+                    title = stringResource(R.string.downloads_cellular_cache),
+                    subtitle = stringResource(R.string.downloads_cellular_cache_hint),
                     trailing = {
                         Switch(
-                            checked = page.wifiOnly,
-                            onCheckedChange = vm::setWifi,
+                            checked = page.cellCache,
+                            onCheckedChange = vm::setCellCache,
                             colors = SwitchDefaults.colors(checkedTrackColor = androidx.compose.ui.graphics.Color(0xFF34C759), checkedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedTrackColor = com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.fill, uncheckedBorderColor = androidx.compose.ui.graphics.Color.Transparent),
                         )
                     },
                 )
-                GroupDivider()
-                SettingRow(
-                    icon = Icons.Filled.DownloadDone,
-                    iconColor = androidx.compose.ui.graphics.Color(0xFF34C759),
-                    title = stringResource(R.string.downloads_auto),
-                    subtitle = stringResource(R.string.downloads_auto_hint),
-                    trailing = {
-                        Switch(
-                            checked = page.auto,
-                            onCheckedChange = vm::setAuto,
-                            colors = SwitchDefaults.colors(checkedTrackColor = androidx.compose.ui.graphics.Color(0xFF34C759), checkedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedTrackColor = com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.fill, uncheckedBorderColor = androidx.compose.ui.graphics.Color.Transparent),
-                        )
-                    },
-                )
-            }
-        }
-        if (page.wifiOnly) {
-            item {
-                Row(Modifier.padding(horizontal = 18.dp, vertical = 8.dp)) {
-                    GlassPill(stringResource(R.string.downloads_wifi_blocked), active = true)
-                }
             }
         }
         if (active.isNotEmpty()) {

@@ -19,14 +19,19 @@ import com.rabbeat.app.domain.model.SourceType
 import com.rabbeat.app.domain.model.SyncSummary
 import com.rabbeat.app.domain.model.TrackOrigin
 import com.rabbeat.app.domain.repository.SettingsRepository
+import com.rabbeat.app.util.ArtworkCache
 import com.rabbeat.app.util.LyricReader
 import com.rabbeat.app.util.Mp3DurationReader
+import com.rabbeat.app.util.NcmDecoder
+import com.rabbeat.app.util.ScanProgress
+import com.rabbeat.app.util.ScanReporter
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -55,39 +60,56 @@ class FolderLibraryImporter @Inject constructor(
     private val lyrics: LyricReader,
     private val settings: SettingsRepository,
     private val netease: NeteaseReconciler,
+    private val ncm: NcmDecoder,
+    private val qmc: com.rabbeat.app.util.QmcDecoder,
+    private val logger: com.rabbeat.app.util.AppLogger,
 ) {
-    suspend fun importTree(tree: Uri): SyncSummary = withContext(Dispatchers.IO) {
-        importTreeForPlaylist(tree).summary
-    }
-
-    suspend fun importTreeForPlaylist(tree: Uri): FolderImportResult = withContext(Dispatchers.IO) {
+    suspend fun importTreeForPlaylist(
+        tree: Uri,
+        onProgress: ScanProgress = { _, _ -> },
+    ): FolderImportResult = withContext(Dispatchers.IO) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
         runCatching { context.contentResolver.takePersistableUriPermission(tree, flags) }
         val sourceId = sourceId(tree)
         val name = folderName(tree)
-        val result = write(sourceId, name, tree)
+        val result = write(sourceId, name, tree, onProgress)
+        logger.i("Scan", "folder import '$name' resolved=${result.trackIds.size} new=${result.summary.trackCount}")
         FolderImportResult(result.summary, name, result.trackIds)
     }
 
-    suspend fun rescanSaved(): SyncSummary = withContext(Dispatchers.IO) {
+    suspend fun rescanSaved(onProgress: ScanProgress = { _, _ -> }): SyncSummary = withContext(Dispatchers.IO) {
         val folders = database.sourceDao().getAll().filter { it.id.startsWith(PREFIX) }
         var tracks = 0
         var albums = 0
         var missing = 0
         folders.forEach { source ->
+            checkActive()
             val root = runCatching { json.decodeFromString(FolderConfig.serializer(), source.configJson).root }.getOrNull() ?: return@forEach
-            val summary = write(source.id, source.displayName, Uri.parse(root)).summary
-            tracks += summary.trackCount
-            albums += summary.albumCount
-            missing += summary.missingMetadata
+            val result = write(source.id, source.displayName, Uri.parse(root), onProgress)
+            tracks += result.trackIds.size
+            albums += result.summary.albumCount
+            missing += result.summary.missingMetadata
         }
         SyncSummary(tracks, albums, missing)
     }
 
+    private suspend fun checkActive() {
+        currentCoroutineContext().ensureActive()
+    }
+
     private data class WriteResult(val summary: SyncSummary, val trackIds: List<String>)
 
-    private suspend fun write(sourceId: String, name: String, tree: Uri): WriteResult {
-        val root = DocumentFile.fromTreeUri(context, tree) ?: return WriteResult(SyncSummary(0, 0, 0), emptyList())
+    private suspend fun write(
+        sourceId: String,
+        name: String,
+        tree: Uri,
+        onProgress: ScanProgress,
+    ): WriteResult {
+        val root = DocumentFile.fromTreeUri(context, tree)
+        if (root == null) {
+            logger.w("Scan", "folder import '$name': unreadable tree")
+            return WriteResult(SyncSummary(0, 0, 0), emptyList())
+        }
         val filters = settings.scanSettings.first()
         val audio = mutableListOf<FoundAudio>()
         val lrcs = linkedMapOf<String, Uri>()
@@ -95,7 +117,16 @@ class FolderLibraryImporter @Inject constructor(
         walk(root, rootName, filters, audio, lrcs)
         audio.sortWith(compareBy({ it.folder.lowercase() }, { (it.file.name ?: "").lowercase() }))
         val now = System.currentTimeMillis()
-            val rows = audio.mapNotNull { file -> readFile(sourceId, file, lrcs, filters, now) }
+        val reporter = ScanReporter(onProgress)
+        val total = audio.size
+        reporter.report(0, total, force = true)
+        val rows = mutableListOf<ScannedFile>()
+        audio.forEachIndexed { index, file ->
+            checkActive()
+            readFile(sourceId, file, lrcs, filters, now)?.let { rows += it }
+            reporter.report(index + 1, total)
+        }
+        checkActive()
         val result = database.withTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(sourceId).associateBy { it.id }
@@ -120,6 +151,22 @@ class FolderLibraryImporter @Inject constructor(
                         trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt, entity.hidden)
                     }
                 }
+            }
+            // A dropped duplicate may be the only copy carrying lyrics (e.g. an .lrc
+            // sitting next to it); hand the lyric to a winner that has none.
+            val rowById = rows.associateBy { it.entity.id }
+            val externalWinners = plan.replaced.values.filterTo(mutableSetOf()) { it !in rowById }
+            val externalHasLyric = trackDao.getByIds(externalWinners.toList())
+                .associate { it.id to !it.lyricUri.isNullOrBlank() }
+            val donatedLyric = mutableMapOf<String, String>()
+            plan.replaced.forEach { (loser, winner) ->
+                val lyric = rowById[loser]?.entity?.lyricUri ?: existing[loser]?.lyricUri ?: return@forEach
+                val hasLyric = when {
+                    winner in donatedLyric -> true
+                    winner in rowById -> !rowById.getValue(winner).entity.lyricUri.isNullOrBlank()
+                    else -> externalHasLyric[winner] == true
+                }
+                if (!hasLyric) donatedLyric[winner] = lyric
             }
             val previous = database.sourceDao().get(sourceId)
             database.sourceDao().upsert(
@@ -148,9 +195,13 @@ class FolderLibraryImporter @Inject constructor(
                     lastPlayedAt = listOfNotNull(preserved?.lastPlayedAt, losers.mapNotNull { it.lastPlayedAt }.maxOrNull()).maxOrNull(),
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.entity.addedAt,
                     hidden = (preserved?.hidden ?: false) || losers.any { it.hidden },
+                    lyricUri = row.entity.lyricUri ?: donatedLyric[row.entity.id],
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }
+            donatedLyric.forEach { (winner, lyric) ->
+                if (winner !in rowById) trackDao.updateLyricUri(winner, lyric)
+            }
             database.albumDao().deleteBySource(sourceId)
             database.artistDao().deleteBySource(sourceId)
             val albums = kept.groupBy { it.entity.albumId }.map { (id, songs) ->
@@ -192,18 +243,21 @@ class FolderLibraryImporter @Inject constructor(
         return result
     }
 
-    private fun walk(
+    private suspend fun walk(
         dir: DocumentFile,
         folder: String,
         filters: ScanSettings,
         audio: MutableList<FoundAudio>,
         lrcs: MutableMap<String, Uri>,
     ) {
-        val children = dir.listFiles()
-        if (children.any { it.name == ".nomedia" }) return
+        // Keep descending even when a folder carries a .nomedia marker: music apps drop
+        // that file in their download roots, so treating it as a stop sign skipped every
+        // song in the subfolders below.
+        val children = runCatching { dir.listFiles() }.getOrDefault(emptyArray<DocumentFile>())
         val current = dir.name?.trim().orEmpty()
         if (filters.rejectsPath(current)) return
         children.forEach { child ->
+            checkActive()
             val childName = child.name ?: return@forEach
             if (childName.startsWith(".")) return@forEach
             when {
@@ -240,9 +294,23 @@ class FolderLibraryImporter @Inject constructor(
         val uri = file.uri
         val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrDefault(uri.toString())
         val id = "fld_${sourceId}_${shortHash(docId)}"
+        val decoded = when {
+            isNcm(name) -> {
+                val result = ncm.decode(uri, "$docId:${size}:${file.lastModified()}") ?: return null
+                if (!result.file.isFile) return null
+                result
+            }
+            com.rabbeat.app.util.QmcDecoder.isQmc(name) -> {
+                val result = qmc.decode(uri, "$docId:${size}:${file.lastModified()}") ?: return null
+                if (!result.file.isFile) return null
+                com.rabbeat.app.util.NcmDecoder.Decoded(result.file, result.mimeType, null)
+            }
+            else -> null
+        }
+        val playUri = decoded?.file?.let(Uri::fromFile) ?: uri
         val retriever = MediaMetadataRetriever()
         val meta = try {
-            retriever.setDataSource(context, uri)
+            retriever.setDataSource(context, playUri)
             Meta(
                 title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
                 artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST),
@@ -250,23 +318,28 @@ class FolderLibraryImporter @Inject constructor(
                 duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull(),
                 year = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR),
                 track = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER),
-                picture = retriever.embeddedPicture,
+                picture = retriever.embeddedPicture
+                    ?: com.rabbeat.app.util.OggCover.read(context, playUri.toString()),
             )
         } catch (_: Exception) {
             Meta(null, null, null, null, null, null, null)
         } finally {
             runCatching { retriever.release() }
         }
-        val title = displayTitle(meta.title, name)
-        val artist = known(meta.artist, "未知艺术家")
-        val album = known(meta.album, "未知专辑")
-        val mime = file.type ?: mimeOf(name)
-        val measured = if (isMp3(name, mime)) mp3Duration.readMillis(uri.toString()) else null
-        val durationMs = measured?.takeIf { it >= 500L } ?: meta.duration ?: 0L
+        val tags = decoded?.tags
+        val title = displayTitle(tags?.title ?: meta.title, name)
+        val artist = known(tags?.artist ?: meta.artist, "未知艺术家")
+        val album = known(tags?.album ?: meta.album, "未知专辑")
+        val mime = decoded?.mimeType ?: file.type ?: mimeOf(name)
+        val measured = if (isMp3(decoded?.file?.name ?: name, mime)) mp3Duration.readMillis(playUri.toString()) else null
+        val durationMs = tags?.durationMs?.takeIf { it >= 500L }
+            ?: measured?.takeIf { it >= 500L }
+            ?: meta.duration
+            ?: 0L
         if (filters.rejectsDuration(durationMs)) return null
-        val artwork = writeCover(id, meta.picture)
+        val artwork = writeCover(id, tags?.cover ?: meta.picture)
         val lyricUri = findLrc(lrcs, found.folder, name)?.let { lyrics.store(id, it) }
-            ?: lyrics.read(uri.toString())?.let { lyrics.storeText(id, it) }
+            ?: lyrics.read(playUri.toString())?.let { lyrics.storeText(id, it) }
         return ScannedFile(
             TrackEntity(
                 id = id,
@@ -282,10 +355,10 @@ class FolderLibraryImporter @Inject constructor(
                 discNumber = null,
                 year = yearOf(meta.year),
                 mimeType = mime,
-                bitrate = null,
+                bitrate = tags?.bitrate,
                 sampleRate = null,
-                fileSize = size.takeIf { it > 0L },
-                uri = uri.toString(),
+                fileSize = decoded?.file?.length()?.takeIf { it > 0L } ?: size.takeIf { it > 0L },
+                uri = playUri.toString(),
                 artworkUri = artwork,
                 origin = TrackOrigin.LOCAL,
                 downloadState = DownloadState.DOWNLOADED,
@@ -299,13 +372,8 @@ class FolderLibraryImporter @Inject constructor(
         )
     }
 
-    private fun writeCover(id: String, picture: ByteArray?): String? {
-        if (picture == null || picture.size < 32) return null
-        val file = File(context.cacheDir, "covers/$id.jpg")
-        file.parentFile?.mkdirs()
-        file.writeBytes(picture)
-        return Uri.fromFile(file).toString()
-    }
+    private fun writeCover(id: String, picture: ByteArray?): String? =
+        ArtworkCache.write(context, id, picture)
 
     private data class Meta(
         val title: String?,
@@ -327,7 +395,7 @@ class FolderLibraryImporter @Inject constructor(
     companion object {
         private const val PREFIX = "fld_"
         private val json = Json { ignoreUnknownKeys = true }
-        private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "ape", "mka", "aiff", "aif")
+        private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "ape", "mka", "aiff", "aif", "ncm", "mgg", "mgg0", "mgg1", "mgg2", "mggl", "mflac", "mflac0", "mflac1", "mflac2", "qmcogg", "qmcflac")
         private val LYRIC_DIRS = setOf("lrc", "lyric", "lyrics", "歌词")
 
         private fun isLyricFolder(name: String): Boolean = LYRIC_DIRS.any { name.equals(it, ignoreCase = true) }
@@ -384,6 +452,8 @@ class FolderLibraryImporter @Inject constructor(
             val type = mime?.lowercase().orEmpty()
             return type == "audio/mpeg" || type == "audio/mp3" || name.endsWith(".mp3", ignoreCase = true)
         }
+
+        private fun isNcm(name: String): Boolean = name.endsWith(".ncm", ignoreCase = true)
 
         private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
             "mp3" -> "audio/mpeg"

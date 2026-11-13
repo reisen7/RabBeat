@@ -4,6 +4,7 @@ import androidx.media3.datasource.cache.ContentMetadata
 import com.rabbeat.app.data.local.dao.TrackDao
 import com.rabbeat.app.data.remote.netease.NETEASE_SOURCE_ID
 import com.rabbeat.app.domain.model.DownloadState
+import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -12,12 +13,12 @@ import kotlinx.coroutines.withContext
 @Singleton
 class NeteaseCacheStatus @Inject constructor(
     private val trackDao: TrackDao,
-    private val mediaCache: MediaCache,
+    private val mediaCache: Lazy<MediaCache>,
 ) {
     suspend fun refresh() = withContext(Dispatchers.IO) {
         val tracks = trackDao.getBySource(NETEASE_SOURCE_ID)
         if (tracks.isEmpty()) return@withContext
-        val cache = mediaCache.cache
+        val cache = mediaCache.get().cache
         val cached = mutableListOf<String>()
         val gone = mutableListOf<String>()
         tracks.forEach { track ->

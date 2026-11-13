@@ -18,7 +18,8 @@ class LyricReader @Inject constructor(
 ) {
     fun read(uriText: String): String? {
         val uri = runCatching { Uri.parse(uriText) }.getOrNull() ?: return null
-        return sidecar(uri) ?: embedded(uri)
+        return runCatching { sidecar(uri) }.getOrNull()
+            ?: runCatching { embedded(uri) }.getOrNull()
     }
 
     fun readText(uriText: String): String? {

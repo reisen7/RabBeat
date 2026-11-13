@@ -2,6 +2,7 @@ package com.rabbeat.app.ui.screens.playlist
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -70,10 +71,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import android.graphics.Bitmap
 import android.net.Uri
 import com.rabbeat.app.R
 import com.rabbeat.app.data.local.FolderImportResult
 import com.rabbeat.app.data.local.FolderLibraryImporter
+import com.rabbeat.app.data.local.PlaylistCoverStore
 import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.model.UserPlaylist
 import com.rabbeat.app.domain.repository.MusicRepository
@@ -85,22 +88,27 @@ import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.GlassPill
 import com.rabbeat.app.ui.components.HeaderIconButton
 import com.rabbeat.app.ui.components.LocateButton
+import com.rabbeat.app.ui.components.PlaylistCover
 import com.rabbeat.app.ui.components.ScreenHeader
 import com.rabbeat.app.ui.components.SelectionCheck
 import com.rabbeat.app.ui.components.TrackRow
+import com.rabbeat.app.ui.screens.appearance.BackgroundCropper
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.io.File
 import javax.inject.Inject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import android.widget.Toast
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class PlaylistPage(val playlist: UserPlaylist?, val tracks: List<Track>, val currentTrackId: String?)
 
@@ -110,6 +118,7 @@ class PlaylistDetailViewModel @Inject constructor(
     private val player: PlayerController,
     private val folders: FolderLibraryImporter,
     private val music: MusicRepository,
+    private val coverStore: PlaylistCoverStore,
 ) : ViewModel() {
     private val _importing = MutableStateFlow(false)
     val importing = _importing.asStateFlow()
@@ -148,6 +157,28 @@ class PlaylistDetailViewModel @Inject constructor(
     fun reorder(playlistId: String, trackIds: List<String>) {
         viewModelScope.launch { playlists.reorderTracks(playlistId, trackIds) }
     }
+    fun stageCover(uri: Uri, onReady: (File?) -> Unit) {
+        viewModelScope.launch {
+            onReady(withContext(Dispatchers.IO) { coverStore.importSource(uri) })
+        }
+    }
+    fun applyCover(playlistId: String, bitmap: Bitmap) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                coverStore.saveCropped(playlistId, bitmap)
+            } ?: return@launch
+            playlists.setCoverUri(playlistId, saved)
+        }
+    }
+    fun discardPendingCover() {
+        viewModelScope.launch { withContext(Dispatchers.IO) { coverStore.discardPending() } }
+    }
+    fun removeCover(playlistId: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { coverStore.release(playlistId) }
+            playlists.setCoverUri(playlistId, null)
+        }
+    }
     fun rename(playlistId: String, name: String) {
         viewModelScope.launch { playlists.rename(playlistId, name) }
     }
@@ -177,6 +208,8 @@ fun PlaylistDetailScreen(
     var addTrackId by remember { mutableStateOf<String?>(null) }
     var addSelection by remember { mutableStateOf<List<String>?>(null) }
     var headerMenu by remember { mutableStateOf(false) }
+    var coverMenu by remember { mutableStateOf(false) }
+    var coverSource by remember { mutableStateOf<File?>(null) }
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     val importing by vm.importing.collectAsStateWithLifecycle()
@@ -205,6 +238,22 @@ fun PlaylistDetailScreen(
                 Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+    val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            vm.stageCover(uri) { file ->
+                if (file != null) {
+                    coverSource = file
+                } else {
+                    Toast.makeText(context, R.string.crop_open_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    val pickCover = {
+        coverPicker.launch(
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+        )
     }
     val shown = page.tracks
         .let { tracks ->
@@ -270,6 +319,11 @@ fun PlaylistDetailScreen(
                             onClick = { headerMenu = true },
                         )
                         DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
+                            CoverActions(
+                                hasCustom = page.playlist?.coverUri != null,
+                                onChange = { headerMenu = false; pickCover() },
+                                onReset = { headerMenu = false; vm.removeCover(playlistId) },
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.action_import_folder)) },
                                 onClick = { headerMenu = false; folderPicker.launch(null) },
@@ -298,6 +352,39 @@ fun PlaylistDetailScreen(
         }
 
         if (!selecting) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                page.playlist?.let { playlist ->
+                    Box {
+                        PlaylistCover(
+                            playlist = playlist,
+                            size = 72.dp,
+                            modifier = Modifier.clickable { coverMenu = true },
+                        )
+                        DropdownMenu(expanded = coverMenu, onDismissRequest = { coverMenu = false }) {
+                            CoverActions(
+                                hasCustom = playlist.coverUri != null,
+                                onChange = { coverMenu = false; pickCover() },
+                                onReset = { coverMenu = false; vm.removeCover(playlistId) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = when {
+                            playlist.coverUri != null -> stringResource(R.string.playlist_cover_custom)
+                            playlist.isSystem -> stringResource(R.string.playlist_cover_set)
+                            else -> stringResource(R.string.playlist_cover_auto)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.secondaryLabel,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -564,6 +651,21 @@ fun PlaylistDetailScreen(
             onDismiss = { addSelection = null },
         )
     }
+    coverSource?.let { file ->
+        BackgroundCropper(
+            source = file,
+            onDone = { bitmap ->
+                vm.applyCover(playlistId, bitmap)
+                coverSource = null
+            },
+            onDismiss = {
+                vm.discardPendingCover()
+                coverSource = null
+            },
+            frameAspect = 1f,
+            maxOutputEdge = 1024,
+        )
+    }
 }
 
 @Composable
@@ -585,6 +687,20 @@ private fun RowScope.SelectionAction(
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
         Text(label, style = MaterialTheme.typography.bodySmall, color = tint)
+    }
+}
+
+@Composable
+private fun CoverActions(hasCustom: Boolean, onChange: () -> Unit, onReset: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.playlist_cover_change)) },
+        onClick = onChange,
+    )
+    if (hasCustom) {
+        DropdownMenuItem(
+            text = { Text(stringResource(R.string.playlist_cover_reset)) },
+            onClick = onReset,
+        )
     }
 }
 

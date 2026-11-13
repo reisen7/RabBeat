@@ -5,10 +5,10 @@ data class LrcLine(val timeMs: Long, val text: String, val translation: String? 
 data class LyricSheet(
     val lines: List<LrcLine>,
     val synced: Boolean,
-    val linked: Boolean,
+    val offsetMs: Long = 0,
 ) {
     companion object {
-        val EMPTY = LyricSheet(emptyList(), synced = false, linked = false)
+        val EMPTY = LyricSheet(emptyList(), synced = false)
     }
 }
 

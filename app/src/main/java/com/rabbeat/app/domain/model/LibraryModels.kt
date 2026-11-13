@@ -65,7 +65,12 @@ data class UserPlaylist(
     val trackCount: Int,
     val updatedAt: Long,
     val isSystem: Boolean = false,
-)
+    val coverUri: String? = null,
+    val autoCoverUri: String? = null,
+) {
+    val displayCoverUri: String?
+        get() = coverUri ?: autoCoverUri.takeIf { !isSystem }
+}
 
 data class PlayRecord(
     val id: Long,

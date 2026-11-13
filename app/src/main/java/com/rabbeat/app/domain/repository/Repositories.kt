@@ -40,9 +40,11 @@ interface MusicRepository {
     fun observeArtistTracks(artistId: String): Flow<List<Track>>
     fun search(query: String): Flow<SearchResult>
     suspend fun getTrack(id: String): Track?
+    suspend fun getTracks(ids: List<String>): List<Track>
     suspend fun toggleFavorite(id: String)
     suspend fun recordPlayback(id: String, positionMs: Long)
     suspend fun updateDuration(id: String, durationMs: Long)
+    suspend fun updateDurations(durations: Map<String, Long>)
     suspend fun hide(ids: List<String>)
     suspend fun unhide(ids: List<String>)
     fun observeHiddenCount(): Flow<Int>
@@ -79,9 +81,6 @@ interface SettingsRepository {
     suspend fun setBackgroundDim(dim: Float)
     suspend fun setCardOpacity(opacity: Float)
 
-    val onboardingDone: Flow<Boolean>
-    suspend fun setOnboardingDone(done: Boolean)
-
     val recentSearches: Flow<List<String>>
     suspend fun pushRecentSearch(query: String)
     suspend fun clearRecentSearches()
@@ -92,11 +91,9 @@ interface SettingsRepository {
     val sleepFade: Flow<Boolean>
     suspend fun setSleepFade(enabled: Boolean)
 
-    val wifiOnlyDownloads: Flow<Boolean>
-    suspend fun setWifiOnlyDownloads(enabled: Boolean)
-
-    val autoOfflineFavorites: Flow<Boolean>
-    suspend fun setAutoOfflineFavorites(enabled: Boolean)
+    /** Whether online (streamed) tracks may load and cache audio on metered networks. */
+    val cellularOnlineCache: Flow<Boolean>
+    suspend fun setCellularOnlineCache(enabled: Boolean)
 
     val scanSettings: Flow<ScanSettings>
     suspend fun updateScanSettings(transform: (ScanSettings) -> ScanSettings)
@@ -107,10 +104,12 @@ interface PlaylistRepository {
     fun observeTracks(playlistId: String): Flow<List<Track>>
     suspend fun create(name: String): String
     suspend fun rename(id: String, name: String)
+    suspend fun setCoverUri(id: String, uri: String?)
     suspend fun delete(id: String)
     suspend fun deleteMany(ids: List<String>)
     suspend fun reorder(orderedIds: List<String>)
-    suspend fun addTracks(playlistId: String, trackIds: List<String>, atStart: Boolean = false)
+    /** Prepends the tracks that are not in the playlist yet and returns how many were new. */
+    suspend fun addTracks(playlistId: String, trackIds: List<String>): Int
     suspend fun removeTrack(playlistId: String, trackId: String)
     suspend fun removeTracks(playlistId: String, trackIds: List<String>)
     suspend fun reorderTracks(playlistId: String, orderedTrackIds: List<String>)

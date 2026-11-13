@@ -80,6 +80,8 @@ fun BackgroundCropper(
     source: File,
     onDone: (Bitmap) -> Unit,
     onDismiss: () -> Unit,
+    frameAspect: Float? = null,
+    maxOutputEdge: Int = 2400,
 ) {
     val context = LocalContext.current
     val accent = LocalAccentPalette.current
@@ -102,7 +104,7 @@ fun BackgroundCropper(
                 }
             }
             bitmap?.let { bmp ->
-                CropEditor(bmp, windowSize, onDone, onDismiss)
+                CropEditor(bmp, windowSize, frameAspect, maxOutputEdge, onDone, onDismiss)
             } ?: CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.Center).size(28.dp),
                 color = accent.color,
@@ -116,6 +118,8 @@ fun BackgroundCropper(
 private fun CropEditor(
     bitmap: Bitmap,
     windowSize: IntSize,
+    frameAspect: Float?,
+    maxOutputEdge: Int,
     onDone: (Bitmap) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -125,6 +129,7 @@ private fun CropEditor(
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
     val imgW = bitmap.width.toFloat()
     val imgH = bitmap.height.toFloat()
+    val aspect = frameAspect ?: (windowSize.width.toFloat() / windowSize.height.toFloat())
     var scale by remember { mutableFloatStateOf(0f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var touching by remember { mutableStateOf(false) }
@@ -164,7 +169,7 @@ private fun CropEditor(
                     saving = true
                     scope.launch {
                         val out = withContext(Dispatchers.Default) {
-                            render(bitmap, windowSize, frameW, frameH, scale, offset)
+                            render(bitmap, aspect, maxOutputEdge, frameW, frameH, scale, offset)
                         }
                         if (out != null) {
                             bitmap.recycle()
@@ -187,7 +192,6 @@ private fun CropEditor(
             val margin = with(density) { 24.dp.toPx() }
             val availW = (constraints.maxWidth - margin * 2).coerceAtLeast(1f)
             val availH = (constraints.maxHeight - margin * 2).coerceAtLeast(1f)
-            val aspect = windowSize.width.toFloat() / windowSize.height.toFloat()
             var fitW = availH * aspect
             var fitH = availH
             if (fitW > availW) {
@@ -313,7 +317,8 @@ private fun CropEditor(
 
 private fun render(
     bitmap: Bitmap,
-    windowSize: IntSize,
+    aspect: Float,
+    maxOutputEdge: Int,
     frameW: Float,
     frameH: Float,
     scale: Float,
@@ -321,9 +326,9 @@ private fun render(
 ): Bitmap? {
     if (scale <= 0f || frameW <= 0f || frameH <= 0f) return null
     val rect = cropRect(bitmap.width.toFloat(), bitmap.height.toFloat(), frameW, frameH, scale, offset)
-    val down = minOf(1f, 2400f / maxOf(windowSize.width, windowSize.height))
-    val outW = (windowSize.width * down).roundToInt().coerceAtLeast(1)
-    val outH = (windowSize.height * down).roundToInt().coerceAtLeast(1)
+    val outSize = outputSize(aspect, maxOutputEdge)
+    val outW = outSize.width
+    val outH = outSize.height
     return runCatching {
         val out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
         val src = android.graphics.Rect(

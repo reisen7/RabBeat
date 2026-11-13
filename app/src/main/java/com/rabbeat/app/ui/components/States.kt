@@ -18,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,13 +57,9 @@ fun BrandMark(modifier: Modifier = Modifier) {
 
 @Composable
 fun LoadingState(modifier: Modifier = Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(32.dp),
-            strokeWidth = 3.dp,
-            color = LocalAccentPalette.current.color,
-            trackColor = Color.Transparent,
-        )
+    val accent = LocalAccentPalette.current
+    Box(modifier, contentAlignment = Alignment.Center) {
+        CircularProgressIndicator(color = accent.color, modifier = Modifier.size(40.dp))
     }
 }
 

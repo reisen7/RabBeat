@@ -1,8 +1,11 @@
 package com.rabbeat.app.ui.screens.settings
 
 import android.Manifest
+import android.content.Intent
+import androidx.core.net.toUri
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
@@ -38,9 +42,9 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -52,8 +56,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -66,6 +72,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,7 +89,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil3.SingletonImageLoader
@@ -96,6 +106,7 @@ import com.rabbeat.app.data.local.NeteasePlaylistImporter
 import com.rabbeat.app.data.local.dao.TrackDao
 import com.rabbeat.app.playback.MediaCache
 import com.rabbeat.app.playback.NeteaseCacheStatus
+import com.rabbeat.app.util.ScanProgress
 import com.rabbeat.app.domain.model.MusicSource
 import com.rabbeat.app.domain.model.ScanSettings
 import com.rabbeat.app.domain.model.ThemeMode
@@ -142,6 +153,13 @@ sealed interface NeteaseImport {
     data object Failed : NeteaseImport
 }
 
+enum class ScanKind { Device, Folder, Rescan }
+
+data class ScanTask(val kind: ScanKind, val done: Int = 0, val total: Int = 0)
+
+private const val SCAN_FAILED = -1
+private const val SCAN_CANCELLED = -2
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
@@ -153,6 +171,8 @@ class SettingsViewModel @Inject constructor(
     private val neteaseImporter: NeteasePlaylistImporter,
     private val mediaCache: MediaCache,
     private val cacheStatus: NeteaseCacheStatus,
+    private val logger: com.rabbeat.app.util.AppLogger,
+    private val updateChecker: com.rabbeat.app.util.UpdateChecker,
 ) : ViewModel() {
     val page = combine(
         settings.themeMode,
@@ -171,33 +191,80 @@ class SettingsViewModel @Inject constructor(
 
     fun setTheme(mode: ThemeMode) { viewModelScope.launch { settings.setThemeMode(mode) } }
     fun setSleep(minutes: Int) { viewModelScope.launch { settings.setSleepTimerMinutes(minutes) } }
+    fun needsAllFilesAccess() = scanner.needsAllFilesAccess()
+
+    private var scanJob: Job? = null
+
     fun importDevice(onDone: (Int) -> Unit) {
-        viewModelScope.launch {
+        if (scanJob?.isActive == true) return
+        scanJob = viewModelScope.launch {
             if (!scanner.hasAudioPermission()) {
                 onDone(-1)
                 return@launch
             }
-            onDone(scanner.importDeviceLibrary().trackCount)
+            runScan(ScanKind.Device, onDone) { report ->
+                scanner.importDeviceLibrary(report).trackCount
+            }
         }
     }
-    fun importFolder(uri: Uri, onDone: (Int) -> Unit) {
-        viewModelScope.launch {
-            onDone(runCatching { folders.importTree(uri).trackCount }.getOrDefault(-1))
+    fun importFolder(uri: Uri, onDone: (added: Int, resolved: Int) -> Unit) {
+        if (scanJob?.isActive == true) return
+        scanJob = viewModelScope.launch {
+            var added = 0
+            runScan(ScanKind.Folder, { code -> if (code < 0) onDone(code, 0) else onDone(added, code) }) { report ->
+                val result = folders.importTreeForPlaylist(uri, report)
+                added = result.summary.trackCount
+                result.trackIds.size
+            }
         }
     }
     fun rescanFolders(onDone: (Int) -> Unit) {
-        viewModelScope.launch {
-            onDone(runCatching { folders.rescanSaved().trackCount }.getOrDefault(-1))
+        if (scanJob?.isActive == true) return
+        scanJob = viewModelScope.launch {
+            runScan(ScanKind.Rescan, onDone) { report ->
+                folders.rescanSaved(report).trackCount
+            }
         }
     }
+
+    fun cancelScan() {
+        scanJob?.cancel()
+    }
+
+    private suspend fun runScan(kind: ScanKind, onDone: (Int) -> Unit, work: suspend (ScanProgress) -> Int) {
+        scan.value = ScanTask(kind)
+        var result = SCAN_CANCELLED
+        try {
+            result = work { done, total -> scan.value = ScanTask(kind, done.coerceAtLeast(0), total.coerceAtLeast(0)) }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Exception) {
+            result = SCAN_FAILED
+        } finally {
+            scan.value = null
+            onDone(result)
+        }
+    }
+
     fun exportBackup(uri: Uri, onDone: (Boolean) -> Unit) {
         viewModelScope.launch { onDone(runCatching { backup.export(uri) }.isSuccess) }
+    }
+    fun exportLogs(uri: Uri, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { logger.exportTo(uri) }
+            logger.i("Logs", "export ${if (ok) "ok" else "failed"}")
+            onDone(ok)
+        }
+    }
+    fun checkUpdate(onDone: (com.rabbeat.app.util.UpdateResult) -> Unit) {
+        viewModelScope.launch { onDone(updateChecker.check()) }
     }
     fun restoreBackup(uri: Uri, onDone: (com.rabbeat.app.data.local.RestoreResult?) -> Unit) {
         viewModelScope.launch { onDone(runCatching { backup.restore(uri) }.getOrNull()) }
     }
 
     val neteaseImport = MutableStateFlow<NeteaseImport>(NeteaseImport.Idle)
+    val scan = MutableStateFlow<ScanTask?>(null)
     private var importJob: Job? = null
     val mediaCacheBytes = MutableStateFlow(0L)
     val hiddenCount = trackDao.observeHiddenCount()
@@ -246,6 +313,7 @@ fun SettingsScreen(
 ) {
     val state by vm.page.collectAsStateWithLifecycle()
     val neteaseImport by vm.neteaseImport.collectAsStateWithLifecycle()
+    val scan by vm.scan.collectAsStateWithLifecycle()
     val mediaCacheBytes by vm.mediaCacheBytes.collectAsStateWithLifecycle()
     val hiddenCount by vm.hiddenCount.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.refreshMediaCache() }
@@ -259,7 +327,12 @@ fun SettingsScreen(
             scope.launch { snack.showSnackbar(denied) }
         } else {
             vm.importDevice { count ->
-                val message = if (count <= 0) context.getString(R.string.scan_empty) else context.getString(R.string.settings_scan_done, count)
+                val message = when {
+                    count == SCAN_CANCELLED -> context.getString(R.string.scan_cancelled)
+                    count < 0 -> context.getString(R.string.scan_failed)
+                    count == 0 -> context.getString(R.string.scan_empty)
+                    else -> context.getString(R.string.settings_scan_done, count)
+                }
                 scope.launch { snack.showSnackbar(message) }
             }
         }
@@ -272,13 +345,20 @@ fun SettingsScreen(
     var restoreConfirm by remember { mutableStateOf(false) }
     var neteaseOpen by remember { mutableStateOf(false) }
     var cacheConfirm by remember { mutableStateOf(false) }
+    var updateResult by remember { mutableStateOf<com.rabbeat.app.util.UpdateResult?>(null) }
+    var updateChecking by remember { mutableStateOf(false) }
+    var allFilesPrompt by remember { mutableStateOf(false) }
+    var waitingForAllFiles by remember { mutableStateOf(false) }
     val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            vm.importFolder(uri) { count ->
+            vm.importFolder(uri) { added, resolved ->
                 val message = when {
-                    count < 0 -> context.getString(R.string.settings_backup_failed)
-                    count == 0 -> context.getString(R.string.scan_empty)
-                    else -> context.getString(R.string.settings_folder_done, count)
+                    added == SCAN_CANCELLED -> context.getString(R.string.scan_cancelled)
+                    added < 0 -> context.getString(R.string.scan_failed)
+                    resolved == 0 -> context.getString(R.string.scan_empty)
+                    added == 0 -> context.getString(R.string.settings_folder_existing, resolved)
+                    added < resolved -> context.getString(R.string.settings_folder_partial, added, resolved - added)
+                    else -> context.getString(R.string.settings_folder_done, added)
                 }
                 scope.launch { snack.showSnackbar(message) }
             }
@@ -288,6 +368,14 @@ fun SettingsScreen(
         if (uri != null) {
             vm.exportBackup(uri) { ok ->
                 val message = if (ok) context.getString(R.string.settings_backup_done) else context.getString(R.string.settings_backup_failed)
+                scope.launch { snack.showSnackbar(message) }
+            }
+        }
+    }
+    val logsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) {
+            vm.exportLogs(uri) { ok ->
+                val message = if (ok) context.getString(R.string.settings_logs_done) else context.getString(R.string.settings_logs_failed)
                 scope.launch { snack.showSnackbar(message) }
             }
         }
@@ -303,6 +391,19 @@ fun SettingsScreen(
                 scope.launch { snack.showSnackbar(message) }
             }
         }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        // Coming back from the "all files access" system page: continue the scan we
+        // interrupted, so NCM files get picked up without a second tap.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && waitingForAllFiles) {
+                waitingForAllFiles = false
+                launcher.launch(permission)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Box(Modifier.fillMaxSize().background(com.rabbeat.app.ui.components.groupedPageBackground())) {
@@ -332,16 +433,42 @@ fun SettingsScreen(
                     onSleep = { sleepOpen = true },
                     onHistory = onHistory,
                     onDownloads = onDownloads,
-                    onScan = { launcher.launch(permission) },
+                    onScan = {
+                        if (vm.needsAllFilesAccess()) {
+                            allFilesPrompt = true
+                        } else {
+                            launcher.launch(permission)
+                        }
+                    },
                     onImportFolder = { folderLauncher.launch(null) },
                     onRescan = {
                         vm.rescanFolders { count ->
                             val message = when {
-                                count < 0 -> context.getString(R.string.settings_backup_failed)
+                                count == SCAN_CANCELLED -> context.getString(R.string.scan_cancelled)
+                                count < 0 -> context.getString(R.string.scan_failed)
                                 count == 0 -> context.getString(R.string.scan_empty)
                                 else -> context.getString(R.string.settings_folder_done, count)
                             }
                             scope.launch { snack.showSnackbar(message) }
+                        }
+                    },
+                    onExportLogs = {
+                        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(java.util.Date())
+                        logsLauncher.launch("rabbeat-logs-$stamp.zip")
+                    },
+                    onCheckUpdate = {
+                        updateChecking = true
+                        vm.checkUpdate { result ->
+                            updateChecking = false
+                            when (result) {
+                                is com.rabbeat.app.util.UpdateResult.Available -> updateResult = result
+                                com.rabbeat.app.util.UpdateResult.Latest -> scope.launch {
+                                    snack.showSnackbar(context.getString(R.string.update_latest))
+                                }
+                                com.rabbeat.app.util.UpdateResult.Failed -> scope.launch {
+                                    snack.showSnackbar(context.getString(R.string.update_failed))
+                                }
+                            }
                         }
                     },
                     onBackup = { exportLauncher.launch("rabbeat-backup.json") },
@@ -436,6 +563,77 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { restoreConfirm = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
+    if (allFilesPrompt) {
+        AlertDialog(
+            onDismissRequest = { allFilesPrompt = false },
+            title = { Text(stringResource(R.string.scan_all_files_title)) },
+            text = { Text(stringResource(R.string.scan_all_files_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    allFilesPrompt = false
+                    waitingForAllFiles = true
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:${context.packageName}"),
+                    )
+                    val opened = runCatching { context.startActivity(intent) }.isSuccess
+                    if (!opened) {
+                        waitingForAllFiles = false
+                        launcher.launch(permission)
+                    }
+                }) { Text(stringResource(R.string.scan_all_files_grant)) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    allFilesPrompt = false
+                    launcher.launch(permission)
+                }) { Text(stringResource(R.string.scan_all_files_skip)) }
+            },
+        )
+    }
+    val running = scan
+    if (running != null) {
+        AlertDialog(
+            onDismissRequest = { vm.cancelScan() },
+            title = {
+                Text(
+                    stringResource(
+                        when (running.kind) {
+                            ScanKind.Device -> R.string.scanning_device
+                            ScanKind.Folder -> R.string.scanning_folder
+                            ScanKind.Rescan -> R.string.scanning_rescan
+                        },
+                    ),
+                )
+            },
+            text = {
+                Column {
+                    if (running.total > 0) {
+                        LinearProgressIndicator(
+                            progress = { (running.done.toFloat() / running.total).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        if (running.total > 0) {
+                            stringResource(R.string.scanning_progress, running.done, running.total)
+                        } else {
+                            stringResource(R.string.scanning_found, running.done)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.cancelScan() }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
     if (neteaseOpen) {
         NeteaseImportSheet(
             state = neteaseImport,
@@ -465,6 +663,40 @@ fun SettingsScreen(
             dismissButton = { TextButton(onClick = { cacheConfirm = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
+
+    if (updateChecking) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(stringResource(R.string.settings_check_update)) },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text(
+                        stringResource(R.string.update_checking),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(start = 14.dp),
+                    )
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    val update = updateResult as? com.rabbeat.app.util.UpdateResult.Available
+    if (update != null) {
+        AlertDialog(
+            onDismissRequest = { updateResult = null },
+            title = { Text(stringResource(R.string.update_available_title)) },
+            text = { Text(stringResource(R.string.update_available_body, update.tag)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    updateResult = null
+                    context.startActivity(Intent(Intent.ACTION_VIEW, update.url.toUri()))
+                }) { Text(stringResource(R.string.action_download)) }
+            },
+            dismissButton = { TextButton(onClick = { updateResult = null }) { Text(stringResource(R.string.action_later)) } },
+        )
+    }
 }
 
 @Composable
@@ -484,6 +716,8 @@ private fun SettingsBody(
     onRescan: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
+    onExportLogs: () -> Unit,
+    onCheckUpdate: () -> Unit,
     onHidden: () -> Unit,
     onClearCache: () -> Unit,
     onLicenses: () -> Unit,
@@ -641,13 +875,6 @@ private fun SettingsBody(
             )
             GroupDivider()
             SettingRow(
-                icon = Icons.Filled.HighQuality,
-                    iconColor = androidx.compose.ui.graphics.Color(0xFFAF52DE),
-                title = stringResource(R.string.settings_quality),
-                subtitle = stringResource(R.string.settings_quality_value),
-            )
-            GroupDivider()
-            SettingRow(
                 icon = Icons.Filled.Bedtime,
                     iconColor = androidx.compose.ui.graphics.Color(0xFF5856D6),
                 title = stringResource(R.string.settings_sleep_default),
@@ -672,6 +899,22 @@ private fun SettingsBody(
                 title = stringResource(R.string.settings_clear_cache),
                 subtitle = stringResource(R.string.settings_cache_size, formatBytes(page.bytes)),
                 onClick = onClearCache,
+            )
+            GroupDivider()
+            SettingRow(
+                icon = Icons.Filled.BugReport,
+                    iconColor = androidx.compose.ui.graphics.Color(0xFF34C759),
+                title = stringResource(R.string.settings_export_logs),
+                subtitle = stringResource(R.string.settings_export_logs_body),
+                onClick = onExportLogs,
+            )
+            GroupDivider()
+            SettingRow(
+                icon = Icons.Filled.SystemUpdate,
+                    iconColor = androidx.compose.ui.graphics.Color(0xFFFF9500),
+                title = stringResource(R.string.settings_check_update),
+                subtitle = stringResource(R.string.settings_check_update_body),
+                onClick = onCheckUpdate,
             )
             GroupDivider()
             SettingRow(
@@ -820,6 +1063,12 @@ private fun NeteaseImportSheet(
                 placeholder = { Text(stringResource(R.string.netease_import_hint)) },
                 singleLine = true,
                 enabled = running == null,
+            )
+            Text(
+                stringResource(R.string.netease_import_hint_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.secondaryLabel,
+                modifier = Modifier.padding(top = 8.dp),
             )
             if (running != null) {
                 Text(

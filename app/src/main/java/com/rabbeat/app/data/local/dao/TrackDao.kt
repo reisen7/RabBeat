@@ -148,6 +148,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET lyricUri = :lyricUri WHERE id = :id")
     suspend fun updateLyricUri(id: String, lyricUri: String?)
 
+    @Query("UPDATE tracks SET lyricOffsetMs = :offsetMs WHERE id = :id")
+    suspend fun updateLyricOffset(id: String, offsetMs: Long)
+
     @Query("UPDATE tracks SET downloadState = :state WHERE id IN (:ids)")
     suspend fun updateDownloadStates(ids: List<String>, state: DownloadState)
 

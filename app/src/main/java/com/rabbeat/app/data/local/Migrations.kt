@@ -41,6 +41,18 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `playlists` ADD COLUMN `coverUri` TEXT")
+    }
+}
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tracks` ADD COLUMN `lyricOffsetMs` INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL(

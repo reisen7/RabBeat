@@ -2,6 +2,7 @@ package com.rabbeat.app.ui.screens.appearance
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.IntSize
 
 /** Scale (view px per image px) at which the image exactly covers the frame. */
 fun minScale(imageW: Float, imageH: Float, frameW: Float, frameH: Float): Float =
@@ -23,6 +24,14 @@ fun clampOffset(
     val maxY = ((imageH * scale - frameH) / 2f).coerceAtLeast(0f)
     return Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
 }
+
+/** Output bitmap size for a frame aspect (width/height) with the long edge capped at [maxEdge]. */
+fun outputSize(aspect: Float, maxEdge: Int): IntSize =
+    if (aspect >= 1f) {
+        IntSize(maxEdge, (maxEdge / aspect).toInt().coerceAtLeast(1))
+    } else {
+        IntSize((maxEdge * aspect).toInt().coerceAtLeast(1), maxEdge)
+    }
 
 /** Crop rectangle in image pixel coordinates for the given view transform. */
 fun cropRect(

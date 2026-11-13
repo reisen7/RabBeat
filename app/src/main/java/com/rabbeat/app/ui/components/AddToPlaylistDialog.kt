@@ -74,18 +74,16 @@ class AddToPlaylistViewModel @Inject constructor(
 ) : ViewModel() {
     val sheets = playlists.observePlaylists().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun add(playlistId: String, trackIds: List<String>, onDone: () -> Unit) {
+    fun add(playlistId: String, trackIds: List<String>, onDone: (Int) -> Unit) {
         viewModelScope.launch {
-            playlists.addTracks(playlistId, trackIds)
-            onDone()
+            onDone(playlists.addTracks(playlistId, trackIds))
         }
     }
 
-    fun create(name: String, trackIds: List<String>, onDone: () -> Unit) {
+    fun create(name: String, trackIds: List<String>, onDone: (Int) -> Unit) {
         viewModelScope.launch {
             val id = playlists.create(name)
-            playlists.addTracks(id, trackIds)
-            onDone()
+            onDone(playlists.addTracks(id, trackIds))
         }
     }
 }
@@ -124,21 +122,21 @@ fun AddToPlaylistDialog(
     val context = LocalContext.current
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    val added: (String) -> () -> Unit = { target ->
-        {
-            val text = if (trackIds.size == 1) {
-                context.getString(R.string.playlist_added, target)
-            } else {
-                context.getString(R.string.playlist_added_multi, trackIds.size, target)
-            }
-            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
-            onAdded()
-            onDismiss()
+    val added: (String, Int) -> Unit = { target, count ->
+        val text = when {
+            count <= 0 && trackIds.size == 1 -> context.getString(R.string.playlist_already_added, target)
+            count <= 0 -> context.getString(R.string.playlist_already_added_multi, target)
+            count < trackIds.size && trackIds.size > 1 -> context.getString(R.string.playlist_added_partial, count, target)
+            trackIds.size == 1 -> context.getString(R.string.playlist_added, target)
+            else -> context.getString(R.string.playlist_added_multi, trackIds.size, target)
         }
+        Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        onAdded()
+        onDismiss()
     }
     val submit = {
         val trimmed = name.trim()
-        if (trimmed.isNotEmpty()) vm.create(trimmed, trackIds, added(trimmed))
+        if (trimmed.isNotEmpty()) vm.create(trimmed, trackIds) { count -> added(trimmed, count) }
     }
 
     ModalBottomSheet(
@@ -246,7 +244,7 @@ fun AddToPlaylistDialog(
                                 }
                             },
                             showDivider = sheets.indexOf(sheet) != sheets.lastIndex,
-                            onClick = { vm.add(sheet.id, trackIds, added(sheet.name)) },
+                            onClick = { vm.add(sheet.id, trackIds) { count -> added(sheet.name, count) } },
                         )
                     }
                     if (sheets.isEmpty()) {

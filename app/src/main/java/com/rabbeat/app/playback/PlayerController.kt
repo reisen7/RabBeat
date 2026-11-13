@@ -14,8 +14,10 @@ import com.rabbeat.app.di.ApplicationScope
 import com.rabbeat.app.domain.model.RepeatMode
 import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.repository.MusicRepository
+import com.rabbeat.app.util.AppLogger
 import com.rabbeat.app.util.MediaItemFactory
 import com.rabbeat.app.util.Mp3DurationReader
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -26,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -57,8 +60,9 @@ class PlayerController @Inject constructor(
     private val playbackStateDao: PlaybackStateDao,
     private val mediaItemFactory: MediaItemFactory,
     private val mp3Duration: Mp3DurationReader,
-    private val mediaCache: MediaCache,
+    private val mediaCache: Lazy<MediaCache>,
     private val cacheStatus: NeteaseCacheStatus,
+    private val logger: AppLogger,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -75,50 +79,61 @@ class PlayerController @Inject constructor(
     private var sleepRemaining: Long? = null
     private var sleepJob: Job? = null
     private var lastPersistAt = 0L
-    private var suppressHistory = false
     private var lastCountedTrackId: String? = null
     private var applyGeneration = 0
     private var player: androidx.media3.exoplayer.ExoPlayer? = null
     var mediaSession: androidx.media3.session.MediaSession? = null
         private set
 
+    private var initJob: Job? = null
+
     fun warmUp() {
-        if (player != null) return
-        val exo = androidx.media3.exoplayer.ExoPlayer.Builder(context)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-                    .build(),
-                true,
-            )
-            .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(C.WAKE_MODE_LOCAL)
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(mediaCache.dataSourceFactory),
-            )
-            .build()
-        exo.addListener(listener)
-        player = exo
-        val openApp = Intent(context, com.rabbeat.app.MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        if (initJob != null) return
+        initJob = scope.launch {
+            val start = SystemClock.elapsedRealtime()
+            // SimpleCache scans its directory on first touch; keep that off the main thread.
+            val factory = withContext(Dispatchers.IO) { mediaCache.get().dataSourceFactory }
+            logger.d("Player", "cache ready ${SystemClock.elapsedRealtime() - start}ms")
+            if (player == null) {
+                val exo = androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(C.USAGE_MEDIA)
+                            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                            .build(),
+                        true,
+                    )
+                    .setHandleAudioBecomingNoisy(true)
+                    .setWakeMode(C.WAKE_MODE_LOCAL)
+                    .setMediaSourceFactory(
+                        androidx.media3.exoplayer.source.DefaultMediaSourceFactory(factory),
+                    )
+                    .build()
+                exo.addListener(listener)
+                player = exo
+                val openApp = Intent(context, com.rabbeat.app.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                val pending = android.app.PendingIntent.getActivity(
+                    context,
+                    0,
+                    openApp,
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                mediaSession = androidx.media3.session.MediaSession.Builder(context, exo)
+                    .setSessionActivity(pending)
+                    .build()
+                // Bind the session service without startForegroundService. Media3 calls
+                // startForeground itself when playback actually starts. Doing it here while
+                // the restored queue is paused crashes with ForegroundServiceDidNotStartInTimeException.
+                context.startService(Intent(context, RabBeatPlaybackService::class.java))
+                logger.d("Player", "built ${SystemClock.elapsedRealtime() - start}ms")
+            }
+            // Siblings, not children: callers join initJob to wait for the player.
+            scope.launch { restore() }
+            scope.launch { watchProgress() }
+            scope.launch { refreshMetadata() }
         }
-        val pending = android.app.PendingIntent.getActivity(
-            context,
-            0,
-            openApp,
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        mediaSession = androidx.media3.session.MediaSession.Builder(context, exo)
-            .setSessionActivity(pending)
-            .build()
-        // Bind the session service without startForegroundService. Media3 calls
-        // startForeground itself when playback actually starts. Doing it here while
-        // the restored queue is paused crashes with ForegroundServiceDidNotStartInTimeException.
-        context.startService(Intent(context, RabBeatPlaybackService::class.java))
-        scope.launch { restore() }
-        scope.launch { watchProgress() }
-        scope.launch { refreshMetadata() }
     }
 
     fun playQueue(tracks: List<Track>, startIndex: Int) {
@@ -134,6 +149,10 @@ class PlayerController @Inject constructor(
 
     fun toggle() {
         val exo = player
+        if (exo == null && initJob?.isActive == true) {
+            scope.launch { initJob?.join(); toggle() }
+            return
+        }
         if (exo == null || exo.mediaItemCount == 0) {
             if (queue.isEmpty()) return
             warmUp()
@@ -149,11 +168,11 @@ class PlayerController @Inject constructor(
     }
 
     fun next() {
-        player?.seekToNext() ?: bump(1, play = false)
+        if ((player?.mediaItemCount ?: 0) > 0) player?.seekToNext() else bump(1, play = false)
     }
 
     fun previous() {
-        player?.seekToPrevious() ?: bump(-1, play = false)
+        if ((player?.mediaItemCount ?: 0) > 0) player?.seekToPrevious() else bump(-1, play = false)
     }
 
     fun seekTo(positionMs: Long) {
@@ -223,9 +242,19 @@ class PlayerController @Inject constructor(
     fun playNext(tracks: List<Track>) {
         if (tracks.isEmpty()) return
         warmUp()
-        val exo = player ?: return
+        val exo = player
+        if (exo == null) {
+            if (initJob?.isActive == true) scope.launch { initJob?.join(); playNext(tracks) }
+            return
+        }
         if (exo.mediaItemCount == 0) {
-            playQueue(tracks, 0)
+            if (queue.isEmpty()) {
+                playQueue(tracks, 0)
+                return
+            }
+            // Restored queue not applied yet — insert into the pending queue.
+            queue = queue.toMutableList().also { it.addAll((index + 1).coerceAtMost(it.size), tracks) }
+            publish(false, pendingSeek)
             return
         }
         val at = (exo.currentMediaItemIndex + 1).coerceAtMost(exo.mediaItemCount)
@@ -237,7 +266,11 @@ class PlayerController @Inject constructor(
     fun enqueue(track: Track) {
         warmUp()
         val exo = player
-        if (exo == null || exo.mediaItemCount == 0) {
+        if (exo == null) {
+            if (initJob?.isActive == true) scope.launch { initJob?.join(); enqueue(track) }
+            return
+        }
+        if (exo.mediaItemCount == 0) {
             queue = queue + track
             if (index < 0) index = 0
             publish(false, pendingSeek)
@@ -287,26 +320,29 @@ class PlayerController @Inject constructor(
     }
 
     private fun applyToPlayer(play: Boolean) {
-        val exo = player ?: return
         val generation = ++applyGeneration
         val snapshot = queue.toList()
         val startIndex = index
         val seek = pendingSeek
-        val countThisPlay = play && !suppressHistory
+        val countThisPlay = play
         scope.launch {
-            val overrides = withContext(Dispatchers.IO) {
-                snapshot.associate { track -> track.id to measuredMp3(track) }
-            }
+            initJob?.join()
+            val exo = player ?: return@launch
+            // Only the track being loaded is measured up front; scanning every mp3 in
+            // the queue serially was the stall users saw before playback restored.
+            val current = snapshot.getOrNull(startIndex)
+            val currentOverride = withContext(Dispatchers.IO) { current?.let { measuredMp3(it) } }
             if (generation != applyGeneration) return@launch
-            overrides.forEach { (id, measured) ->
-                val track = snapshot.find { it.id == id } ?: return@forEach
-                if (measured != null && kotlin.math.abs(measured - track.durationMs) > 1_000L) {
-                    musicRepository.updateDuration(id, measured)
-                    queue = queue.map { if (it.id == id) it.copy(durationMs = measured) else it }
-                }
+            if (current != null && currentOverride != null &&
+                kotlin.math.abs(currentOverride - current.durationMs) > 1_000L
+            ) {
+                musicRepository.updateDuration(current.id, currentOverride)
+                queue = queue.map { if (it.id == current.id) it.copy(durationMs = currentOverride) else it }
             }
             exo.setMediaItems(
-                snapshot.map { mediaItemFactory.create(it, overrides[it.id]) },
+                snapshot.mapIndexed { i, track ->
+                    mediaItemFactory.create(track, if (i == startIndex) currentOverride else null)
+                },
                 startIndex.coerceAtLeast(0),
                 seek,
             )
@@ -318,6 +354,7 @@ class PlayerController @Inject constructor(
             }
             exo.playbackParameters = PlaybackParameters(speed)
             exo.prepare()
+            logger.d("Player", "applied ${snapshot.size} items play=$countThisPlay")
             if (play) {
                 exo.play()
                 if (countThisPlay) notePlay()
@@ -326,6 +363,41 @@ class PlayerController @Inject constructor(
             }
             publish(play, seek)
             persist()
+            measureQueueDurations(snapshot, startIndex, generation)
+        }
+    }
+
+    /**
+     * Measures mp3 durations off the critical path, then applies corrections in one
+     * batch: a single Room transaction (one observer emission) and a single
+     * replace pass. Doing this per track used to fire hundreds of player events —
+     * the media-notification storm in the logs — and O(n²) getMediaItemAt scans.
+     */
+    private suspend fun measureQueueDurations(snapshot: List<Track>, startIndex: Int, generation: Int) {
+        val corrections = mutableMapOf<String, Long>()
+        snapshot.forEachIndexed { i, track ->
+            if (generation != applyGeneration) return
+            if (i == startIndex) return@forEachIndexed
+            val measured = withContext(Dispatchers.IO) { measuredMp3(track) } ?: return@forEachIndexed
+            if (kotlin.math.abs(measured - track.durationMs) > 1_000L) {
+                corrections[track.id] = measured
+            }
+        }
+        if (generation != applyGeneration || corrections.isEmpty()) return
+        logger.d("Player", "duration corrections: ${corrections.size}")
+        musicRepository.updateDurations(corrections)
+        queue = queue.map { t -> corrections[t.id]?.let { t.copy(durationMs = it) } ?: t }
+        val exo = player ?: return
+        val exoIndexById = (0 until exo.mediaItemCount)
+            .associate { exo.getMediaItemAt(it).mediaId to it }
+        val tracksById = snapshot.associateBy { it.id }
+        val current = exo.currentMediaItemIndex
+        corrections.forEach { (id, measured) ->
+            val exoIndex = exoIndexById[id]
+            val track = tracksById[id]
+            if (exoIndex != null && track != null && exoIndex != current) {
+                exo.replaceMediaItem(exoIndex, mediaItemFactory.create(track, measured))
+            }
         }
     }
 
@@ -355,7 +427,7 @@ class PlayerController @Inject constructor(
             return
         }
         val ids = runCatching { json.decodeFromString<StoredQueue>(raw).ids }.getOrDefault(emptyList())
-        val restored = ids.mapNotNull { musicRepository.getTrack(it) }
+        val restored = musicRepository.getTracks(ids)
         if (restored.isEmpty()) {
             _state.update { it.copy(restoring = false) }
             return
@@ -363,12 +435,12 @@ class PlayerController @Inject constructor(
         queue = restored
         index = restored.indexOfFirst { it.id == saved.trackId }.let { if (it < 0) 0 else it }
         pendingSeek = saved.positionMs
-        suppressHistory = true
-        try {
-            applyToPlayer(play = false)
-        } finally {
-            suppressHistory = false
-        }
+        logger.d("Player", "restored ${restored.size} tracks index=$index seek=${pendingSeek}ms")
+        // Show the restored track immediately instead of waiting for the player.
+        publish(false, pendingSeek)
+        // Media items are applied lazily on first play (toggle -> applyToPlayer):
+        // a whole-queue setMediaItems burst on main was the last startup hitch
+        // when users scrolled immediately after the feed appeared.
         _state.update { it.copy(restoring = false) }
     }
 
@@ -387,7 +459,7 @@ class PlayerController @Inject constructor(
     }
 
     private suspend fun refreshMetadata() {
-        musicRepository.observeTracks().collect { latest ->
+        musicRepository.observeTracks().conflate().collect { latest ->
             if (queue.isEmpty()) return@collect
             val byId = latest.associateBy { it.id }
             queue = queue.map { byId[it.id] ?: it }
@@ -428,7 +500,6 @@ class PlayerController @Inject constructor(
     }
 
     private fun notePlay() {
-        if (suppressHistory) return
         val exo = player ?: return
         if (!exo.playWhenReady) return
         val id = exo.currentMediaItem?.mediaId ?: return
@@ -461,6 +532,7 @@ class PlayerController @Inject constructor(
 
         override fun onPlayerError(playbackException: PlaybackException) {
             error = playbackException.message
+            logger.e("Player", "playback error", playbackException)
             publish(false, player?.currentPosition ?: 0L)
         }
     }

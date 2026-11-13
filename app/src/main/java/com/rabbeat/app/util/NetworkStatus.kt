@@ -38,6 +38,13 @@ class NetworkStatus @Inject constructor(
         awaitClose { manager.unregisterNetworkCallback(callback) }
     }.distinctUntilChanged()
 
+    /** True when the active network is metered (cellular). Defaults to false when unknown. */
+    fun isMetered(): Boolean {
+        val network = manager?.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(network) ?: return false
+        return !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
     private fun hasInternet(): Boolean {
         val network = manager?.activeNetwork ?: return false
         val caps = manager.getNetworkCapabilities(network) ?: return false

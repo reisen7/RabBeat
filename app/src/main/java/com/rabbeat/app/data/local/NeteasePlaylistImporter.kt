@@ -35,6 +35,7 @@ class NeteasePlaylistImporter @Inject constructor(
     private val database: RabBeatDatabase,
     private val api: NeteaseApi,
     private val reconciler: NeteaseReconciler,
+    private val logger: com.rabbeat.app.util.AppLogger,
 ) {
     suspend fun import(
         input: String,
@@ -46,16 +47,28 @@ class NeteasePlaylistImporter @Inject constructor(
                 ?.let { api.resolveRedirect(it) }
                 ?.let(NeteaseLinks::parsePlaylistId)
         }
-        if (playlistId == null) throw InvalidNeteaseLinkException()
+        if (playlistId == null) {
+            logger.w("Netease", "import failed: unparseable link")
+            throw InvalidNeteaseLinkException()
+        }
 
-        val detail = api.playlist(playlistId) ?: throw NeteaseNetworkException()
+        val detail = api.playlist(playlistId)
+        if (detail == null) {
+            logger.w("Netease", "playlist($playlistId) fetch failed")
+            throw NeteaseNetworkException()
+        }
         val wanted = detail.trackIds.map { it.id }.distinct()
+        logger.i("Netease", "import '${detail.name}' id=$playlistId tracks=${wanted.size}")
         onProgress(0, wanted.size)
 
         val songs = mutableListOf<NeSong>()
         val privileges = mutableListOf<NePrivilege>()
         wanted.chunked(100).forEachIndexed { index, batch ->
-            val response = api.songDetails(batch) ?: throw NeteaseNetworkException()
+            val response = api.songDetails(batch)
+            if (response == null) {
+                logger.w("Netease", "songDetails batch $index failed")
+                throw NeteaseNetworkException()
+            }
             songs += response.songs
             privileges += response.privileges
             onProgress(((index + 1) * 100).coerceAtMost(wanted.size), wanted.size)
@@ -139,6 +152,7 @@ class NeteasePlaylistImporter @Inject constructor(
                     createdAt = old?.createdAt ?: now,
                     updatedAt = now,
                     sortOrder = old?.sortOrder ?: ((playlistDao.minSortOrder() ?: 0) - 1),
+                    coverUri = old?.coverUri,
                 ),
             )
             playlistDao.deleteTracks(playlistTableId)
@@ -149,6 +163,7 @@ class NeteasePlaylistImporter @Inject constructor(
             )
         }
         reconciler.reconcile()
+        logger.i("Netease", "import done '$finalName' imported=$imported matched=$matched skipped=$skipped")
         NeteaseImportResult(finalName, imported, matched, skipped)
     }
 }

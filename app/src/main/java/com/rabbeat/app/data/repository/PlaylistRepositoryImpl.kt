@@ -2,6 +2,7 @@ package com.rabbeat.app.data.repository
 
 import androidx.room.withTransaction
 import com.rabbeat.app.data.local.LikedPlaylist
+import com.rabbeat.app.data.local.PlaylistCoverStore
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.reorderedPositions
 import com.rabbeat.app.data.local.dao.PlaylistDao
@@ -26,10 +27,16 @@ class PlaylistRepositoryImpl @Inject constructor(
     private val sourceDao: SourceDao,
     private val likedPlaylist: LikedPlaylist,
     private val database: RabBeatDatabase,
+    private val coverStore: PlaylistCoverStore,
 ) : PlaylistRepository {
     override fun observePlaylists(): Flow<List<UserPlaylist>> =
-        combine(playlistDao.observeAll(), playlistDao.observeVisibleCounts()) { rows, counts ->
+        combine(
+            playlistDao.observeAll(),
+            playlistDao.observeVisibleCounts(),
+            playlistDao.observeLatestArtwork(),
+        ) { rows, counts, artwork ->
             val byPlaylist = counts.associate { it.playlistId to it.trackCount }
+            val artworkByPlaylist = artwork.associate { it.playlistId to it.artworkUri }
             rows.map { row ->
                 UserPlaylist(
                     id = row.id,
@@ -37,6 +44,8 @@ class PlaylistRepositoryImpl @Inject constructor(
                     trackCount = byPlaylist[row.id] ?: 0,
                     updatedAt = row.updatedAt,
                     isSystem = row.isSystem,
+                    coverUri = row.coverUri,
+                    autoCoverUri = artworkByPlaylist[row.id],
                 )
             }
         }
@@ -74,10 +83,15 @@ class PlaylistRepositoryImpl @Inject constructor(
         playlistDao.rename(id, trimmed, System.currentTimeMillis())
     }
 
+    override suspend fun setCoverUri(id: String, uri: String?) {
+        playlistDao.setCover(id, uri)
+    }
+
     override suspend fun delete(id: String) {
         if (playlistDao.get(id)?.isSystem == true) return
         playlistDao.deleteTracks(id)
         playlistDao.delete(id)
+        coverStore.release(id)
     }
 
     override suspend fun deleteMany(ids: List<String>) {
@@ -86,6 +100,7 @@ class PlaylistRepositoryImpl @Inject constructor(
                 if (playlistDao.get(id)?.isSystem == true) return@forEach
                 playlistDao.deleteTracks(id)
                 playlistDao.delete(id)
+                coverStore.release(id)
             }
         }
     }
@@ -98,29 +113,21 @@ class PlaylistRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun addTracks(playlistId: String, trackIds: List<String>, atStart: Boolean) {
+    override suspend fun addTracks(playlistId: String, trackIds: List<String>): Int {
         val existing = playlistDao.refs(playlistId)
         val have = existing.map { it.trackId }.toSet()
         val fresh = trackIds.distinct().filter { it !in have }
-        if (fresh.isEmpty()) return
+        if (fresh.isEmpty()) return 0
         val now = System.currentTimeMillis()
-        if (atStart) {
-            playlistDao.shift(playlistId, fresh.size)
-            playlistDao.upsertTracks(
-                fresh.mapIndexed { index, trackId ->
-                    PlaylistTrackCrossRef(playlistId, trackId, index, now)
-                },
-            )
-        } else {
-            val start = (existing.maxOfOrNull { it.position } ?: -1) + 1
-            playlistDao.upsertTracks(
-                fresh.mapIndexed { index, trackId ->
-                    PlaylistTrackCrossRef(playlistId, trackId, start + index, now)
-                },
-            )
-        }
+        playlistDao.shift(playlistId, fresh.size)
+        playlistDao.upsertTracks(
+            fresh.mapIndexed { index, trackId ->
+                PlaylistTrackCrossRef(playlistId, trackId, index, now)
+            },
+        )
         playlistDao.touch(playlistId, now)
         if (playlistId == LikedPlaylist.ID) likedPlaylist.onAdded(fresh)
+        return fresh.size
     }
 
     override suspend fun removeTracks(playlistId: String, trackIds: List<String>) {
@@ -151,6 +158,6 @@ class PlaylistRepositoryImpl @Inject constructor(
 
     override suspend fun saveQueue(name: String, trackIds: List<String>) {
         val id = create(name.ifBlank { "我的队列" })
-        addTracks(id, trackIds, atStart = false)
+        addTracks(id, trackIds)
     }
 }

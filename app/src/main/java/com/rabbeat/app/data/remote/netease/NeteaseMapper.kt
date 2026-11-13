@@ -42,7 +42,7 @@ object NeteaseMapper {
         discNumber = null,
         year = null,
         mimeType = "audio/mpeg",
-        bitrate = 320000,
+        bitrate = 128000,
         sampleRate = null,
         fileSize = null,
         uri = streamUrl(song.id),

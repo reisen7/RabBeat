@@ -32,6 +32,14 @@ class NeteaseApi @Inject constructor() {
         runCatching { json.decodeFromString(NeSongDetailResponse.serializer(), body) }.getOrNull()
     }
 
+    suspend fun search(keyword: String, limit: Int = 8): List<NeSearchSong> = withContext(Dispatchers.IO) {
+        val encoded = URLEncoder.encode(keyword, "UTF-8")
+        val body = get("$HOST/api/search/get?s=$encoded&type=1&limit=$limit") ?: return@withContext emptyList()
+        runCatching {
+            json.decodeFromString(NeSearchResponse.serializer(), body).result?.songs
+        }.getOrNull().orEmpty()
+    }
+
     suspend fun lyrics(id: Long): NeLyricResponse? = withContext(Dispatchers.IO) {
         val body = get("$HOST/api/song/lyric?id=$id&lv=1&tv=-1") ?: return@withContext null
         runCatching { json.decodeFromString(NeLyricResponse.serializer(), body) }.getOrNull()

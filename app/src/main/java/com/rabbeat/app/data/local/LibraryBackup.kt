@@ -25,6 +25,7 @@ class LibraryBackup @Inject constructor(
     private val trackDao: TrackDao,
     private val historyDao: PlayHistoryDao,
     private val likedPlaylist: LikedPlaylist,
+    private val logger: com.rabbeat.app.util.AppLogger,
 ) {
     suspend fun export(target: Uri) = withContext(Dispatchers.IO) {
         val playlists = playlistDao.getAll().filter { !it.isSystem }
@@ -41,6 +42,7 @@ class LibraryBackup @Inject constructor(
         context.contentResolver.openOutputStream(target)?.use { output ->
             output.write(json.encodeToString(BackupFile.serializer(), file).toByteArray())
         } ?: error("无法写入备份文件")
+        logger.i("Backup", "exported ${file.playlists.size} playlists fav=${file.favoriteIds.size} history=${file.history.size}")
     }
 
     suspend fun restore(source: Uri): RestoreResult = withContext(Dispatchers.IO) {
@@ -89,6 +91,7 @@ class LibraryBackup @Inject constructor(
         }
         historyDao.clear()
         if (restoredHistory.isNotEmpty()) historyDao.insertAll(restoredHistory)
+        logger.i("Backup", "restored ${file.playlists.size} playlists missing=$missing")
         RestoreResult(file.playlists.size, missing)
     }
 

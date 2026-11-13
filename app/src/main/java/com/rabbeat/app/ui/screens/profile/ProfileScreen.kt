@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -242,17 +242,10 @@ private fun ProfileBody(
                 onAction = onPlaylists,
             )
         }
-        item {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 18.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item(key = "new") { NewPlaylistCard(onCreate) }
-                items(page.playlists, key = { it.id }) { playlist ->
-                    PlaylistCard(playlist) { onPlaylist(playlist.id) }
-                }
-            }
+        items(page.playlists.take(5), key = { it.id }) { playlist ->
+            PlaylistRow(playlist) { onPlaylist(playlist.id) }
         }
+        item { NewPlaylistRow(onCreate) }
         if (page.playlists.isEmpty()) {
             item {
                 Text(
@@ -379,63 +372,65 @@ private fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun NewPlaylistCard(onClick: () -> Unit) {
+private fun NewPlaylistRow(onClick: () -> Unit) {
     val accent = LocalAccentPalette.current
-    Column(
+    Row(
         Modifier
-            .width(150.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
-                .size(150.dp)
+                .size(52.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(LocalRabBeatPalette.current.fill),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Add, contentDescription = null, tint = accent.color, modifier = Modifier.size(34.dp))
+            Icon(Icons.Filled.Add, contentDescription = null, tint = accent.color, modifier = Modifier.size(24.dp))
         }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            stringResource(R.string.profile_playlist_new),
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Text(
-            stringResource(R.string.profile_playlist_hint_short),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(
+                stringResource(R.string.profile_playlist_new),
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+            )
+            Text(
+                stringResource(R.string.profile_playlist_hint_short),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+        }
     }
 }
 
 @Composable
-private fun PlaylistCard(playlist: UserPlaylist, onClick: () -> Unit) {
-    Column(
+private fun PlaylistRow(playlist: UserPlaylist, onClick: () -> Unit) {
+    Row(
         Modifier
-            .width(150.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        PlaylistCover(playlist, 150.dp)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            playlist.name,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Text(
-            stringResource(R.string.profile_tracks_count, playlist.trackCount),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
+        PlaylistCover(playlist, 52.dp)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(
+                playlist.name,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stringResource(R.string.profile_tracks_count, playlist.trackCount),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

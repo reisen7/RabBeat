@@ -4,12 +4,15 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
 import java.io.File
+import java.security.MessageDigest
 import com.rabbeat.app.data.local.entity.AlbumEntity
 import com.rabbeat.app.data.local.entity.ArtistEntity
 import com.rabbeat.app.data.local.entity.SourceEntity
@@ -23,12 +26,20 @@ import com.rabbeat.app.domain.model.SourceType
 import com.rabbeat.app.domain.model.SyncSummary
 import com.rabbeat.app.domain.model.TrackOrigin
 import com.rabbeat.app.domain.repository.SettingsRepository
+import com.rabbeat.app.util.ArtworkCache
 import com.rabbeat.app.util.LyricReader
 import com.rabbeat.app.util.Mp3DurationReader
+import com.rabbeat.app.util.NcmDecoder
+import com.rabbeat.app.util.OggCover
+import com.rabbeat.app.util.QmcDecoder
+import com.rabbeat.app.util.ScanProgress
+import com.rabbeat.app.util.ScanReporter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
@@ -40,6 +51,9 @@ class LocalMediaScanner @Inject constructor(
     private val lyrics: LyricReader,
     private val settings: SettingsRepository,
     private val netease: NeteaseReconciler,
+    private val ncm: NcmDecoder,
+    private val qmc: QmcDecoder,
+    private val logger: com.rabbeat.app.util.AppLogger,
 ) {
     fun hasAudioPermission(): Boolean {
         val permission = if (Build.VERSION.SDK_INT >= 33) {
@@ -50,14 +64,30 @@ class LocalMediaScanner @Inject constructor(
         return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     }
 
-    suspend fun importDeviceLibrary(): SyncSummary = withContext(Dispatchers.IO) {
+    /** True when scanning NCM files needs the user to grant "all files access". */
+    fun needsAllFilesAccess(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()
+
+    /** All files access (or pre-Android-11 storage access) lets us read `.ncm` directly. */
+    fun hasAllFilesAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            hasAudioPermission()
+        }
+
+    suspend fun importDeviceLibrary(onProgress: ScanProgress = { _, _ -> }): SyncSummary = withContext(Dispatchers.IO) {
         if (!hasAudioPermission()) {
+            logger.w("Scan", "device import skipped: no audio permission")
             return@withContext SyncSummary(trackCount = 0, albumCount = 0, missingMetadata = 0)
         }
+        val started = System.currentTimeMillis()
         val filters = settings.scanSettings.first()
         val lyricIndex = indexSidecars()
-        val rows = queryAll(filters, lyricIndex)
+        val reporter = ScanReporter(onProgress)
+        val rows = queryAll(filters, lyricIndex, reporter)
         val now = System.currentTimeMillis()
+        checkActive()
         val summary = database.withTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(SOURCE_ID).associateBy { it.id }
@@ -171,19 +201,31 @@ class LocalMediaScanner @Inject constructor(
             )
         }
         netease.reconcile()
+        logger.i("Scan", "device import tracks=${summary.trackCount} albums=${summary.albumCount} missingMeta=${summary.missingMetadata} in ${System.currentTimeMillis() - started}ms")
         summary
     }
 
-    private fun queryAll(filters: ScanSettings, lyricIndex: Map<String, LyricHit>): List<Scanned> {
+    private suspend fun queryAll(
+        filters: ScanSettings,
+        lyricIndex: Map<String, LyricHit>,
+        progress: ScanReporter,
+    ): List<Scanned> {
         if (!hasAudioPermission()) return emptyList()
         val found = linkedMapOf<String, Scanned>()
         volumes().forEach { (volume, audioUri) ->
-            query(audioUri, volume, audioColumns(), fromAudioTable = true, filters, lyricIndex, found)
+            query(audioUri, volume, audioColumns(), fromAudioTable = true, filters, lyricIndex, found, progress)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                query(MediaStore.Files.getContentUri(volume), volume, fileColumns(), fromAudioTable = false, filters, lyricIndex, found)
+                query(MediaStore.Files.getContentUri(volume), volume, fileColumns(), fromAudioTable = false, filters, lyricIndex, found, progress)
             }
         }
+        queryEncrypted(filters, lyricIndex, found, progress)
+        if (hasAllFilesAccess()) scanEncryptedFolders(filters, lyricIndex, found, progress)
+        progress.report(found.size, 0, force = true)
         return found.values.toList()
+    }
+
+    private suspend fun checkActive() {
+        currentCoroutineContext().ensureActive()
     }
 
     private fun volumes(): List<Pair<String, Uri>> {
@@ -196,7 +238,7 @@ class LocalMediaScanner @Inject constructor(
         }
     }
 
-    private fun query(
+    private suspend fun query(
         collection: Uri,
         volume: String,
         projection: Array<String>,
@@ -204,6 +246,7 @@ class LocalMediaScanner @Inject constructor(
         filters: ScanSettings,
         lyricIndex: Map<String, LyricHit>,
         into: MutableMap<String, Scanned>,
+        progress: ScanReporter,
     ) {
         val selection = if (fromAudioTable) {
             "${MediaStore.MediaColumns.SIZE} >= ?"
@@ -224,10 +267,13 @@ class LocalMediaScanner @Inject constructor(
         }.getOrNull() ?: return
         cursor.use { rows ->
             while (rows.moveToNext()) {
+                checkActive()
                 val name = rows.text(MediaStore.MediaColumns.DISPLAY_NAME) ?: continue
                 if (name.startsWith(".")) continue
                 val mime = rows.text(MediaStore.MediaColumns.MIME_TYPE)
                 if (!isAudio(name, mime)) continue
+                // Encrypted containers are decoded separately by queryEncrypted().
+                if (isEncrypted(name)) continue
                 val data = rows.text(MediaStore.MediaColumns.DATA)
                 val relative = rows.text(MediaStore.MediaColumns.RELATIVE_PATH)
                 if (filters.filterNonSongs && isNonSong(rows, fromAudioTable, relative, data)) continue
@@ -250,6 +296,8 @@ class LocalMediaScanner @Inject constructor(
                 val trackId = "dev_${volume}_$mediaId"
                 val artwork = if (fromAudioTable && albumStoreId > 0L) {
                     ContentUris.withAppendedId(ALBUM_ART, albumStoreId).toString()
+                } else if (isOgg(name, mime)) {
+                    OggCover.read(context, uri)?.let { ArtworkCache.write(context, trackId, it) }
                 } else {
                     null
                 }
@@ -277,8 +325,263 @@ class LocalMediaScanner @Inject constructor(
                     lyricUri = attachLyric(trackId, uri, data, name, folder, lyricIndex),
                     folder = folder,
                 )
+                progress.report(into.size, 0)
             }
         }
+    }
+
+    /**
+     * NetEase `.ncm` and QQ Music `.mgg`/`.mflac` files are not indexed as audio,
+     * so they are queried from the Files table and decrypted into app storage
+     * before being added to the library.
+     */
+    private suspend fun queryEncrypted(
+        filters: ScanSettings,
+        lyricIndex: Map<String, LyricHit>,
+        into: MutableMap<String, Scanned>,
+        progress: ScanReporter,
+    ) {
+        val minBytes = if (filters.skipSmallFiles) filters.minSizeBytes else 1L
+        volumes().forEach { (volume, _) ->
+            val collection = MediaStore.Files.getContentUri(volume)
+            val projection = mutableListOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.MIME_TYPE,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_ADDED,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+                MediaStore.MediaColumns.DATA,
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                projection += MediaStore.MediaColumns.RELATIVE_PATH
+            }
+            val cursor = runCatching {
+                context.contentResolver.query(
+                    collection,
+                    projection.toTypedArray(),
+                    "${MediaStore.MediaColumns.SIZE} >= ? AND (" +
+                        ENCRYPTED_EXT.joinToString(" OR ") {
+                            "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.$it'"
+                        } + ")",
+                    arrayOf(minBytes.toString()),
+                    null,
+                )
+            }.getOrNull() ?: return@forEach
+            cursor.use { rows ->
+                while (rows.moveToNext()) {
+                    checkActive()
+                    val name = rows.text(MediaStore.MediaColumns.DISPLAY_NAME) ?: continue
+                    if (name.startsWith(".")) continue
+                    val size = rows.number(MediaStore.MediaColumns.SIZE)
+                    if (filters.rejectsSize(size)) continue
+                    val data = rows.text(MediaStore.MediaColumns.DATA)
+                    val relative = rows.text(MediaStore.MediaColumns.RELATIVE_PATH)
+                    if (filtersPath(relative) || filtersPath(data)) continue
+                    val dedupe = identity(relative, data, name)
+                    if (into.containsKey(dedupe)) continue
+                    val mediaId = rows.number(MediaStore.MediaColumns._ID)
+                    if (mediaId <= 0L) continue
+                    val sourceUri = ContentUris.withAppendedId(collection, mediaId)
+                    val modified = rows.number(MediaStore.MediaColumns.DATE_MODIFIED)
+                    val decoded = decodeEncrypted(name, sourceUri, "$volume:$mediaId:$size:$modified") ?: continue
+                    if (!decoded.file.isFile) continue
+                    logger.i("Scan", "encrypted '$name' decoded to ${decoded.file.name} mime=${decoded.mimeType}")
+                    val playUri = Uri.fromFile(decoded.file).toString()
+                    val tags = decoded.tags
+                    val meta = if (tags == null) readMeta(playUri) else null
+                    val durationMs = tags?.durationMs ?: meta?.duration ?: readDuration(playUri)
+                    logger.d("Scan", "'$name' meta title=${meta?.title} picture=${meta?.picture?.size ?: 0}B")
+                    if (filters.rejectsDuration(durationMs)) continue
+                    val trackId = "dev_${volume}_$mediaId"
+                    val folder = matchFolder(relative, data).ifBlank { null }
+                    val artist = known(tags?.artist ?: meta?.artist, "未知艺术家")
+                    val album = known(tags?.album ?: meta?.album, "未知专辑")
+                    val addedSeconds = rows.number(MediaStore.MediaColumns.DATE_ADDED)
+                    into[dedupe] = Scanned(
+                        id = trackId,
+                        remoteId = "$volume:$mediaId",
+                        title = displayTitle(tags?.title ?: meta?.title, name),
+                        artist = artist,
+                        artistId = "devart_${artist.lowercase()}",
+                        album = album,
+                        albumId = "devalb_${artist.lowercase()}_${album.lowercase()}",
+                        durationMs = durationMs,
+                        trackNumber = null,
+                        discNumber = null,
+                        year = null,
+                        mimeType = decoded.mimeType,
+                        size = decoded.file.length(),
+                        uri = playUri,
+                        artworkUri = ArtworkCache.write(context, trackId, tags?.cover ?: meta?.picture),
+                        addedAt = if (addedSeconds > 0L) addedSeconds * 1000L else System.currentTimeMillis(),
+                        lyricUri = attachLyric(trackId, playUri, data, name, folder, lyricIndex),
+                        folder = folder,
+                        sourcePath = data,
+                    )
+                    progress.report(into.size, 0)
+                }
+            }
+        }
+    }
+
+    private data class FileMeta(
+        val title: String?,
+        val artist: String?,
+        val album: String?,
+        val duration: Long,
+        val picture: ByteArray?,
+    )
+
+    private fun readMeta(uri: String): FileMeta? {
+        val retriever = MediaMetadataRetriever()
+        return runCatching {
+            retriever.setDataSource(context, Uri.parse(uri))
+            FileMeta(
+                title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
+                picture = retriever.embeddedPicture ?: OggCover.read(context, uri),
+            )
+        }.getOrNull().also { runCatching { retriever.release() } }
+    }
+
+    private fun readDuration(uri: String): Long {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, Uri.parse(uri))
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        } catch (_: Exception) {
+            0L
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private fun decodeEncrypted(name: String, uri: Uri, cacheKey: String): NcmDecoder.Decoded? = when {
+        isNcm(name) -> ncm.decode(uri, cacheKey)
+        QmcDecoder.isQmc(name) -> qmc.decode(uri, cacheKey)
+            ?.let { NcmDecoder.Decoded(it.file, it.mimeType, null) }
+        else -> null
+    }
+
+    /**
+     * Walks the usual download locations for NetEase `.ncm` and QQ Music
+     * `.mgg`/`.mflac` files. MediaStore never indexes them as audio, so with all
+     * files access granted the folders are read directly
+     * (e.g. Download/netease/cloudmusic/Music, qqmusic/song).
+     */
+    private suspend fun scanEncryptedFolders(
+        filters: ScanSettings,
+        lyricIndex: Map<String, LyricHit>,
+        into: MutableMap<String, Scanned>,
+        progress: ScanReporter,
+    ) {
+        val root = Environment.getExternalStorageDirectory() ?: return
+        val rootPath = root.absolutePath.trimEnd('/')
+        val known = into.values.mapNotNull { it.sourcePath }.mapTo(mutableSetOf()) { it.lowercase() }
+        encryptedRoots(root).forEach { dir -> walkEncrypted(dir, 0, filters, rootPath, lyricIndex, into, known, progress) }
+    }
+
+    private fun encryptedRoots(root: File): List<File> {
+        val candidates = mutableListOf(
+            File(root, "Download"),
+            File(root, "Music"),
+        )
+        root.listFiles()?.forEach { dir ->
+            if (!dir.isDirectory || dir.name.startsWith(".")) return@forEach
+            val name = dir.name.lowercase()
+            if (name.contains("netease") || name.contains("cloud") || name.contains("网易") ||
+                name.contains("qqmusic") || name.contains("qq") || name.contains("腾讯")
+            ) {
+                candidates += dir
+            }
+        }
+        return candidates.filter { it.isDirectory }.distinctBy { it.absolutePath }
+    }
+
+    private suspend fun walkEncrypted(
+        dir: File,
+        depth: Int,
+        filters: ScanSettings,
+        rootPath: String,
+        lyricIndex: Map<String, LyricHit>,
+        into: MutableMap<String, Scanned>,
+        known: MutableSet<String>,
+        progress: ScanReporter,
+    ) {
+        if (depth > MAX_NCM_DEPTH) return
+        checkActive()
+        val children = runCatching { dir.listFiles() }.getOrNull() ?: return
+        children.forEach { file ->
+            checkActive()
+            val name = file.name
+            if (name.startsWith(".")) return@forEach
+            when {
+                file.isDirectory -> {
+                    if (name.equals("Android", ignoreCase = true)) return@forEach
+                    walkEncrypted(file, depth + 1, filters, rootPath, lyricIndex, into, known, progress)
+                }
+                isEncrypted(name) -> addFilesystemEncrypted(file, filters, rootPath, lyricIndex, into, known, progress)
+            }
+        }
+    }
+
+    private suspend fun addFilesystemEncrypted(
+        file: File,
+        filters: ScanSettings,
+        rootPath: String,
+        lyricIndex: Map<String, LyricHit>,
+        into: MutableMap<String, Scanned>,
+        known: MutableSet<String>,
+        progress: ScanReporter,
+    ) {
+        val name = file.name
+        val path = file.absolutePath
+        if (path.lowercase() in known) return
+        if (filters.rejectsPath(path)) return
+        val size = file.length()
+        if (filters.rejectsSize(size)) return
+        val identity = "fs:${path.lowercase()}"
+        if (into.containsKey(identity)) return
+        val decoded = decodeEncrypted(name, Uri.fromFile(file), "fs:$path:$size:${file.lastModified()}") ?: return
+        if (!decoded.file.isFile) return
+        val tags = decoded.tags
+        val playUri = Uri.fromFile(decoded.file).toString()
+        val meta = if (tags == null) readMeta(playUri) else null
+        val durationMs = tags?.durationMs ?: meta?.duration ?: readDuration(playUri)
+        if (filters.rejectsDuration(durationMs)) return
+        val trackId = "dev_${if (isNcm(name)) "ncm" else "qmc"}_${shortHash(path)}"
+        val folder = file.parentFile?.absolutePath
+            ?.removePrefix(rootPath)
+            ?.trim('/')
+            ?.ifBlank { null }
+        val artist = known(tags?.artist ?: meta?.artist, "未知艺术家")
+        val album = known(tags?.album ?: meta?.album, "未知专辑")
+        into[identity] = Scanned(
+            id = trackId,
+            remoteId = path,
+            title = displayTitle(tags?.title ?: meta?.title, name),
+            artist = artist,
+            artistId = "devart_${artist.lowercase()}",
+            album = album,
+            albumId = "devalb_${artist.lowercase()}_${album.lowercase()}",
+            durationMs = durationMs,
+            trackNumber = null,
+            discNumber = null,
+            year = null,
+            mimeType = decoded.mimeType,
+            size = decoded.file.length(),
+            uri = playUri,
+            artworkUri = ArtworkCache.write(context, trackId, tags?.cover ?: meta?.picture),
+            addedAt = file.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis(),
+            lyricUri = attachLyric(trackId, playUri, path, name, folder, lyricIndex),
+            folder = folder,
+            sourcePath = path,
+        )
+        known += path.lowercase()
+        progress.report(into.size, 0)
     }
 
     private fun audioColumns(): Array<String> {
@@ -351,6 +654,7 @@ class LocalMediaScanner @Inject constructor(
         val addedAt: Long,
         val lyricUri: String?,
         val folder: String?,
+        val sourcePath: String? = null,
     )
 
     private fun Scanned.toCandidate(): DupCandidate = DupCandidate(
@@ -431,21 +735,21 @@ class LocalMediaScanner @Inject constructor(
         name: String,
         folder: String?,
         index: Map<String, LyricHit>,
-    ): String? {
+    ): String? = runCatching {
         val stem = name.substringBeforeLast('.').lowercase()
         val hit = index[lyricKey(folder, stem)]
         if (hit != null) {
-            lyrics.store(id, hit.uri)?.let { return it }
+            lyrics.store(id, hit.uri)?.let { return@runCatching it }
             val path = hit.path
             if (!path.isNullOrBlank()) {
-                lyrics.store(id, Uri.fromFile(File(path)))?.let { return it }
+                lyrics.store(id, Uri.fromFile(File(path)))?.let { return@runCatching it }
             }
         }
         fileSidecar(data, name)?.let { file ->
-            lyrics.store(id, Uri.fromFile(file))?.let { return it }
+            lyrics.store(id, Uri.fromFile(file))?.let { return@runCatching it }
         }
-        return lyrics.read(audioUri)?.let { lyrics.storeText(id, it) }
-    }
+        lyrics.read(audioUri)?.let { lyrics.storeText(id, it) }
+    }.getOrNull()
 
     private fun fileSidecar(data: String?, name: String): File? {
         val parent = data?.substringBeforeLast('/', "")?.takeIf { it.isNotBlank() } ?: return null
@@ -470,9 +774,10 @@ class LocalMediaScanner @Inject constructor(
 
     companion object {
         const val SOURCE_ID = "src_device"
+        private const val MAX_NCM_DEPTH = 8
         private val ALBUM_ART: Uri = Uri.parse("content://media/external/audio/albumart")
         private val LYRIC_DIRS = setOf("lrc", "lyric", "lyrics", "歌词")
-        private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "ape", "mka", "aiff", "aif")
+        private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "wma", "ape", "mka", "aiff", "aif", "ncm", "mgg", "mflac")
 
         private fun identity(relative: String?, data: String?, name: String): String {
             val folder = relative?.trim()?.trim('/')?.lowercase().orEmpty()
@@ -550,6 +855,30 @@ class LocalMediaScanner @Inject constructor(
         private fun isMp3(name: String, mime: String?): Boolean {
             val type = mime?.lowercase().orEmpty()
             return type == "audio/mpeg" || type == "audio/mp3" || name.endsWith(".mp3", ignoreCase = true)
+        }
+
+        private fun isOgg(name: String, mime: String?): Boolean {
+            val type = mime?.lowercase().orEmpty()
+            if (type == "audio/ogg" || type == "application/ogg" || type == "audio/opus") return true
+            val lower = name.lowercase()
+            return lower.endsWith(".ogg") || lower.endsWith(".oga") || lower.endsWith(".opus")
+        }
+
+        private fun isNcm(name: String): Boolean = name.endsWith(".ncm", ignoreCase = true)
+
+        private val ENCRYPTED_EXT = setOf(
+            "ncm",
+            "mgg", "mgg0", "mgg1", "mgg2", "mggl",
+            "mflac", "mflac0", "mflac1", "mflac2",
+            "qmcogg", "qmcflac",
+        )
+
+        private fun isEncrypted(name: String): Boolean =
+            name.substringAfterLast('.', "").lowercase() in ENCRYPTED_EXT
+
+        private fun shortHash(text: String): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
+            return digest.take(8).joinToString("") { "%02x".format(it) }
         }
     }
 }

@@ -27,6 +27,11 @@ import com.rabbeat.app.ui.theme.LocalAccentPalette
 fun PlaylistCover(playlist: UserPlaylist, size: Dp, modifier: Modifier = Modifier) {
     val accent = LocalAccentPalette.current
     val density = LocalDensity.current
+    val cover = playlist.displayCoverUri
+    if (cover != null) {
+        Artwork(cover, playlist.name, modifier.size(size), 8.dp)
+        return
+    }
     Box(
         modifier
             .size(size)

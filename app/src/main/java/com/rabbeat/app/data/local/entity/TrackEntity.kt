@@ -42,6 +42,7 @@ data class TrackEntity(
     val lastPlayedAt: Long?,
     val addedAt: Long,
     val lyricUri: String? = null,
+    @ColumnInfo(defaultValue = "0") val lyricOffsetMs: Long = 0,
     val folder: String? = null,
     @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
 )

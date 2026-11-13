@@ -1,11 +1,8 @@
 package com.rabbeat.app.ui.navigation
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -16,10 +13,13 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -38,14 +38,15 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.rabbeat.app.R
+import com.rabbeat.app.domain.model.AccentTheme
 import com.rabbeat.app.domain.model.AppearanceSettings
 import com.rabbeat.app.domain.model.ThemeMode
 import com.rabbeat.app.domain.repository.SettingsRepository
 import com.rabbeat.app.playback.PlayerController
 import com.rabbeat.app.ui.components.AppDrawer
 import com.rabbeat.app.ui.components.BottomTab
-import com.rabbeat.app.ui.components.BrandMark
 import com.rabbeat.app.ui.components.DrawerSection
+import com.rabbeat.app.ui.components.LoadingState
 import com.rabbeat.app.ui.components.MiniPlayerBar
 import com.rabbeat.app.ui.components.RabBeatBackground
 import com.rabbeat.app.ui.components.RabBeatBottomBar
@@ -58,7 +59,6 @@ import com.rabbeat.app.ui.screens.hidden.HiddenTracksScreen
 import com.rabbeat.app.ui.screens.history.HistoryScreen
 import com.rabbeat.app.ui.screens.home.HomeScreen
 import com.rabbeat.app.ui.screens.library.LibraryScreen
-import com.rabbeat.app.ui.screens.onboarding.OnboardingScreen
 import com.rabbeat.app.ui.screens.player.PlayerScreen
 import com.rabbeat.app.ui.screens.playlist.PlaylistDetailScreen
 import com.rabbeat.app.ui.screens.playlist.PlaylistsScreen
@@ -70,6 +70,7 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.ui.theme.RabBeatTheme
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -77,7 +78,6 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 sealed interface Route {
-    @Serializable data object Onboarding : Route
     @Serializable data object Home : Route
     @Serializable data object Library : Route
     @Serializable data object Search : Route
@@ -101,47 +101,48 @@ class AppShellViewModel @Inject constructor(
     settings: SettingsRepository,
     val player: PlayerController,
 ) : ViewModel() {
-    val theme = settings.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemeMode.SYSTEM)
+    // null = still loading; the splash stays up until the first real emission
+    // so the screen never flashes default theme/black before user settings arrive.
+    val theme = settings.themeMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null as ThemeMode?)
     val appearance = settings.appearance.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        AppearanceSettings(),
+        null as AppearanceSettings?,
     )
     val playback = player.state
-    val onboardingDone = settings.onboardingDone.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
-        null,
-    )
 }
 
 @Composable
 fun RabBeatApp(vm: AppShellViewModel = hiltViewModel()) {
+    // Defer player init until the splash and first content frame are on screen;
+    // ExoPlayer + MediaSession construction costs a few hundred ms on main.
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        withFrameNanos { }
+        vm.player.warmUp()
+    }
     val theme by vm.theme.collectAsStateWithLifecycle()
     val appearance by vm.appearance.collectAsStateWithLifecycle()
-    val onboardingDone by vm.onboardingDone.collectAsStateWithLifecycle()
-    RabBeatTheme(themeMode = theme, accentTheme = appearance.accent) {
-        RabBeatBackground(appearance) {
-            val done = onboardingDone
-            if (done == null) {
-                RabBeatSplash()
+    // Reveal the UI only once appearance is loaded and — when a background image
+    // is configured — its first decoded frame is on screen, so there's no
+    // black-then-image flash. Timeout keeps a broken/slow image from trapping us.
+    var backdropReady by remember { mutableStateOf(false) }
+    var timedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(appearance) {
+        delay(1500)
+        timedOut = true
+    }
+    val loaded = appearance != null && theme != null
+    val needsBackdrop = appearance?.let { it.backgroundEnabled && !it.backgroundUri.isNullOrBlank() } == true
+    val ready = loaded && (!needsBackdrop || backdropReady || timedOut)
+    RabBeatTheme(themeMode = theme ?: ThemeMode.SYSTEM, accentTheme = appearance?.accent ?: AccentTheme.ROSE) {
+        RabBeatBackground(appearance ?: AppearanceSettings(), onBackdropReady = { backdropReady = true }) {
+            if (ready) {
+                RabBeatScaffold(shell = vm, startDestination = Route.Home)
             } else {
-                val start = remember { if (done) Route.Home else Route.Onboarding }
-                RabBeatScaffold(shell = vm, startDestination = start)
+                LoadingState(Modifier.fillMaxSize())
             }
         }
-    }
-}
-
-@Composable
-private fun RabBeatSplash() {
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(LocalRabBeatPalette.current.background),
-        contentAlignment = Alignment.Center,
-    ) {
-        BrandMark(Modifier.size(96.dp))
     }
 }
 
@@ -235,15 +236,6 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                 startDestination = startDestination,
                 modifier = if (immersive) Modifier else Modifier.padding(padding),
             ) {
-                composable<Route.Onboarding> {
-                    OnboardingScreen(
-                        onFinished = {
-                            navController.navigate(Route.Home) {
-                                popUpTo<Route.Onboarding> { inclusive = true }
-                            }
-                        },
-                    )
-                }
                 composable<Route.Home> {
                     HomeScreen(
                         onMenu = { scope.launch { drawerState.open() } },
@@ -368,5 +360,5 @@ private fun NavDestination?.drawerSection(): DrawerSection? = when {
 
 private fun NavDestination?.isImmersive(): Boolean {
     if (this == null) return false
-    return hasRoute<Route.Player>() || hasRoute<Route.Queue>() || hasRoute<Route.Onboarding>()
+    return hasRoute<Route.Player>() || hasRoute<Route.Queue>()
 }
