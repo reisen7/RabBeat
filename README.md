@@ -11,15 +11,15 @@
 
 在 [Releases](https://github.com/reisen7/RabBeat/releases) 下载最新的 `RabBeat-<版本>.apk` 直接安装。
 
-## 截图
+## 效果图
 
 <p>
-  <img src="doc/img1.jpeg" width="180" alt="首页" />
-  <img src="doc/img2.jpg" width="180" alt="曲库" />
-  <img src="doc/img3.jpg" width="180" alt="搜索" />
-  <img src="doc/img4.jpg" width="180" alt="个人" />
-  <img src="doc/img5.jpg" width="180" alt="设置" />
-  <img src="doc/img6.jpg" width="180" alt="播放" />
+  <img src="doc/img1.jpeg" width="250" alt="首页" />
+  <img src="doc/img2.jpg" width="250" alt="曲库" />
+  <img src="doc/img3.jpg" width="250" alt="搜索" />
+  <img src="doc/img4.jpg" width="250" alt="个人" />
+  <img src="doc/img5.jpg" width="250" alt="设置" />
+  <img src="doc/img6.jpg" width="250" alt="播放" />
 </p>
 
 ## 功能
