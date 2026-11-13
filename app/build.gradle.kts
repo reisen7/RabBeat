@@ -19,6 +19,15 @@ fun signingValue(env: String, key: String): String? =
 
 val releaseStoreFile = signingValue("RABBEAT_KEYSTORE_FILE", "storeFile")?.let { rootProject.file(it) }
 
+val tagVersion = runCatching {
+    providers.exec {
+        commandLine("git", "describe", "--tags", "--abbrev=0")
+    }.standardOutput.asText.get().trim().removePrefix("v")
+}.getOrDefault("")
+
+val tagVersionCode = Regex("""(\d+)\.(\d+)\.(\d+)""").find(tagVersion)?.destructured
+    ?.let { (major, minor, patch) -> major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt() }
+
 android {
     namespace = "com.rabbeat.app"
     compileSdk {
@@ -31,8 +40,8 @@ android {
         applicationId = "com.rabbeat.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: 1
-        versionName = providers.gradleProperty("versionName").orNull ?: "0.1.0"
+        versionCode = providers.gradleProperty("versionCode").orNull?.toIntOrNull() ?: tagVersionCode ?: 1
+        versionName = providers.gradleProperty("versionName").orNull ?: tagVersion.ifBlank { "0.0.0-dev" }
     }
 
     signingConfigs {

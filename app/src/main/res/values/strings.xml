@@ -335,7 +335,6 @@
     <string name="action_play">播放</string>
     <string name="detail_missing">没有找到这条记录</string>
 
-    <string name="app_version">0.1.0</string>
     <string name="state_queued">排队</string>
     <string name="state_downloading">下载中</string>
     <string name="state_downloaded">已完成</string>

@@ -1,6 +1,7 @@
 package com.rabbeat.app.ui.components
 
 import android.content.Intent
+import com.rabbeat.app.BuildConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -134,7 +135,7 @@ fun AppDrawer(
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        stringResource(R.string.drawer_version, stringResource(R.string.app_version)),
+                        stringResource(R.string.drawer_version, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.labelMedium,
                         color = palette.tertiaryLabel,
                     )
@@ -171,7 +172,7 @@ fun AppDrawer(
             text = {
                 Column {
                     Text(
-                        stringResource(R.string.drawer_version, stringResource(R.string.app_version)),
+                        stringResource(R.string.drawer_version, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Spacer(Modifier.height(8.dp))

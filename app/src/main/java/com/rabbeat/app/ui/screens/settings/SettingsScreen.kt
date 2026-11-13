@@ -96,6 +96,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil3.SingletonImageLoader
+import com.rabbeat.app.BuildConfig
 import com.rabbeat.app.R
 import com.rabbeat.app.data.local.FolderLibraryImporter
 import com.rabbeat.app.data.local.InvalidNeteaseLinkException
@@ -921,7 +922,7 @@ private fun SettingsBody(
                 icon = Icons.Filled.Info,
                     iconColor = androidx.compose.ui.graphics.Color(0xFF007AFF),
                 title = stringResource(R.string.settings_about),
-                subtitle = stringResource(R.string.settings_version, stringResource(R.string.app_version)),
+                subtitle = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
                 onClick = onLicenses,
             )
         }
