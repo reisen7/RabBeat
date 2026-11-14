@@ -180,6 +180,7 @@ fun HomeScreen(
     onOpenPlayer: () -> Unit,
     onImport: () -> Unit,
     onHistory: () -> Unit,
+    onRecent: () -> Unit,
     vm: HomeViewModel = hiltViewModel(),
 ) {
     val state by vm.content.collectAsStateWithLifecycle()
@@ -204,6 +205,7 @@ fun HomeScreen(
                 onOpenPlayer = onOpenPlayer,
                 onToggle = vm.player::toggle,
                 onHistory = onHistory,
+                onRecent = onRecent,
                 onPlay = { track ->
                     val index = home.top.indexOfFirst { it.id == track.id }
                     vm.play(home.top, index.coerceAtLeast(0))
@@ -227,6 +229,7 @@ private fun HomeFeed(
     onOpenPlayer: () -> Unit,
     onToggle: () -> Unit,
     onHistory: () -> Unit,
+    onRecent: () -> Unit,
     onPlay: (Track) -> Unit,
     onFavorite: (String) -> Unit,
     onDownload: (String) -> Unit,
@@ -285,7 +288,7 @@ private fun HomeFeed(
         }
 
         item {
-            SectionHeader(stringResource(R.string.home_recent), onAction = onHistory)
+            SectionHeader(stringResource(R.string.home_recent), onAction = onRecent)
             if (home.recent.isEmpty()) {
                 Text(
                     stringResource(R.string.home_recent_empty),

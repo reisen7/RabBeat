@@ -130,10 +130,13 @@ class FolderLibraryImporter @Inject constructor(
         val result = database.withTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(sourceId).associateBy { it.id }
-            val others = trackDao.getOtherSources(sourceId)
+            val otherEntities = trackDao.getOtherSources(sourceId)
                 .filter { it.sourceId != NETEASE_SOURCE_ID }
-                .map { it.toCandidate() }
-            val plan = TrackDeduper.plan(rows.map { it.entity.toCandidate() }, existing.keys, others)
+            val others = otherEntities.map { it.toCandidate() }
+            val hiddenIds = (existing.values + otherEntities)
+                .filter { it.hidden }
+                .mapTo(mutableSetOf()) { it.id }
+            val plan = TrackDeduper.plan(rows.map { it.entity.toCandidate() }, existing.keys, others, hiddenIds)
             val kept = rows.filter { it.entity.id in plan.keptIds }
             val losersByWinner = mutableMapOf<String, MutableList<TrackEntity>>()
             plan.replaced.forEach { (loser, winner) ->
@@ -148,7 +151,12 @@ class FolderLibraryImporter @Inject constructor(
                     if (winner in plan.keptIds) {
                         losersByWinner.getOrPut(winner) { mutableListOf() } += entity
                     } else {
-                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt, entity.hidden)
+                        val winnerFolder = existing[winner]?.folder
+                            ?: others.firstOrNull { it.id == winner }?.folder
+                        trackDao.mergeStatsInto(
+                            winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt,
+                            hidden = entity.hidden && sameFolder(entity.folder, winnerFolder),
+                        )
                     }
                 }
             }
@@ -194,7 +202,7 @@ class FolderLibraryImporter @Inject constructor(
                     playCount = maxOf(preserved?.playCount ?: 0, losers.maxOfOrNull { it.playCount } ?: 0),
                     lastPlayedAt = listOfNotNull(preserved?.lastPlayedAt, losers.mapNotNull { it.lastPlayedAt }.maxOrNull()).maxOrNull(),
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.entity.addedAt,
-                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden },
+                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden && sameFolder(it.folder, row.entity.folder) },
                     lyricUri = row.entity.lyricUri ?: donatedLyric[row.entity.id],
                 )
             }

@@ -168,7 +168,9 @@ class PlayerController @Inject constructor(
     }
 
     fun next() {
-        if ((player?.mediaItemCount ?: 0) > 0) player?.seekToNext() else bump(1, play = false)
+        val exo = player ?: return bump(1, play = false)
+        if (exo.mediaItemCount == 0) return bump(1, play = false)
+        if (exo.hasNextMediaItem()) exo.seekToNext() else exo.seekTo(0, 0L)
     }
 
     fun previous() {

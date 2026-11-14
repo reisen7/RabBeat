@@ -57,6 +57,7 @@ import com.rabbeat.app.ui.screens.detail.SourceDetailScreen
 import com.rabbeat.app.ui.screens.downloads.DownloadsScreen
 import com.rabbeat.app.ui.screens.hidden.HiddenTracksScreen
 import com.rabbeat.app.ui.screens.history.HistoryScreen
+import com.rabbeat.app.ui.screens.recent.RecentlyAddedScreen
 import com.rabbeat.app.ui.screens.home.HomeScreen
 import com.rabbeat.app.ui.screens.library.LibraryScreen
 import com.rabbeat.app.ui.screens.player.PlayerScreen
@@ -87,6 +88,7 @@ sealed interface Route {
     @Serializable data object Downloads : Route
     @Serializable data object History : Route
     @Serializable data object HiddenTracks : Route
+    @Serializable data object RecentlyAdded : Route
     @Serializable data object Settings : Route
     @Serializable data object Appearance : Route
     @Serializable data class AlbumDetail(val albumId: String) : Route
@@ -212,6 +214,7 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                                 onToggle = shell.player::toggle,
                                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
                                 onNext = shell.player::next,
+                                onPrev = shell.player::previous,
                             )
                         }
                         RabBeatBottomBar(
@@ -242,6 +245,7 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onOpenPlayer = { navController.navigate(Route.Player) },
                         onImport = { navController.navigate(Route.Settings) },
                         onHistory = { navController.navigate(Route.History) },
+                        onRecent = { navController.navigate(Route.RecentlyAdded) },
                     )
                 }
                 composable<Route.Library> {
@@ -283,6 +287,7 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                     )
                 }
                 composable<Route.HiddenTracks> { HiddenTracksScreen(onBack = { navController.popBackStack() }) }
+                composable<Route.RecentlyAdded> { RecentlyAddedScreen(onBack = { navController.popBackStack() }) }
                 composable<Route.Appearance> {
                     AppearanceScreen(onBack = { navController.popBackStack() })
                 }

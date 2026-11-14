@@ -21,6 +21,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import kotlin.math.abs
 
 private val coverColors = listOf(
@@ -62,7 +64,7 @@ fun Artwork(
                 contentScale = ContentScale.Crop,
             )
             !artworkUri.isNullOrBlank() && !artworkUri.startsWith("android.resource://") -> AsyncImage(
-                model = artworkUri,
+                model = ImageRequest.Builder(context).data(artworkUri).crossfade(160).build(),
                 contentDescription = title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

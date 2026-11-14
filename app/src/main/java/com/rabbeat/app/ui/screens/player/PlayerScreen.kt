@@ -3,10 +3,19 @@ package com.rabbeat.app.ui.screens.player
 import android.widget.Toast
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -59,7 +68,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -96,9 +107,12 @@ import com.rabbeat.app.util.LyricSheet
 import com.rabbeat.app.util.formatClock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlin.math.abs
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
@@ -133,10 +147,11 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     val state by vm.playback.collectAsStateWithLifecycle()
     val track = state.currentTrack
     val context = LocalContext.current
-    var tint by remember(track?.id) { mutableStateOf(Color(0xFF7C5CFF)) }
+    var tintTarget by remember(track?.id) { mutableStateOf(Color(0xFF7C5CFF)) }
     LaunchedEffect(track?.artworkUri) {
-        tint = vm.colors.dominant(track?.artworkUri) ?: Color(0xFF7C5CFF)
+        tintTarget = vm.colors.dominant(track?.artworkUri) ?: Color(0xFF7C5CFF)
     }
+    val tint by androidx.compose.animation.animateColorAsState(tintTarget, tween(500), label = "bg-tint")
     var lyrics by remember { mutableStateOf(false) }
     var sleep by remember { mutableStateOf(false) }
     var speed by remember { mutableStateOf(false) }
@@ -144,6 +159,59 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     var addToPlaylist by remember { mutableStateOf(false) }
     var lyricMatching by remember { mutableStateOf(false) }
     var offsetDialog by remember { mutableStateOf(false) }
+    var switchDir by remember { mutableIntStateOf(1) }
+    val scope = rememberCoroutineScope()
+    val qSize = state.queue.size
+    val nextPeek = if (!state.shuffle && qSize > 1) state.queue.getOrNull((state.currentIndex + 1) % qSize) else null
+    val prevPeek = if (!state.shuffle && qSize > 1) state.queue.getOrNull((state.currentIndex - 1 + qSize) % qSize) else null
+    var shownTrack by remember(track?.id) { mutableStateOf(track) }
+    var artX by remember { mutableFloatStateOf(0f) }
+    var artW by remember { mutableFloatStateOf(1f) }
+    var artSwitching by remember { mutableStateOf(false) }
+    var artHandledId by remember { mutableStateOf(track?.id) }
+    fun artSwitch(dir: Int) {
+        if (artSwitching) return
+        artSwitching = true
+        switchDir = dir
+        val peek = if (dir == 1) nextPeek else prevPeek
+        scope.launch {
+            try {
+                animate(artX, -dir * artW, animationSpec = tween(170, easing = FastOutLinearInEasing)) { v, _ -> artX = v }
+                if (peek != null && peek.id != track?.id) {
+                    shownTrack = peek
+                    artHandledId = peek.id
+                    artX = dir * artW
+                    animate(artX, 0f, animationSpec = tween(220, easing = FastOutSlowInEasing)) { v, _ -> artX = v }
+                    if (dir == 1) vm.player.next() else vm.player.previous()
+                } else {
+                    if (dir == 1) vm.player.next() else vm.player.previous()
+                    val old = track?.id
+                    withTimeoutOrNull(400) { snapshotFlow { track?.id }.first { it != old } }
+                    shownTrack = track
+                    artHandledId = track?.id
+                    artX = dir * artW
+                    animate(artX, 0f, animationSpec = tween(220, easing = FastOutSlowInEasing)) { v, _ -> artX = v }
+                }
+            } finally {
+                artSwitching = false
+            }
+        }
+    }
+    LaunchedEffect(track?.id) {
+        val id = track?.id ?: return@LaunchedEffect
+        if (id == artHandledId || artSwitching) return@LaunchedEffect
+        artHandledId = id
+        artX = switchDir * artW
+        animate(artX, 0f, animationSpec = tween(220, easing = FastOutSlowInEasing)) { v, _ -> artX = v }
+    }
+    LaunchedEffect(track?.artworkUri, nextPeek?.artworkUri, prevPeek?.artworkUri) {
+        val loader = coil3.SingletonImageLoader.get(context)
+        for (uri in listOf(track?.artworkUri, nextPeek?.artworkUri, prevPeek?.artworkUri)) {
+            if (!uri.isNullOrBlank() && !uri.startsWith("android.resource://")) {
+                loader.enqueue(coil3.request.ImageRequest.Builder(context).data(uri).build())
+            }
+        }
+    }
     var lyricScale by remember { mutableFloatStateOf(1f) }
     var lyricNonce by remember { mutableIntStateOf(0) }
     val pickLyric = rememberLauncherForActivityResult(
@@ -184,18 +252,24 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                 ),
         )
         if (track != null) {
-            Artwork(
-                track.artworkUri,
-                track.title,
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = 1.35f
-                        scaleY = 1.35f
-                    }
-                    .blur(90.dp),
-                0.dp,
-            )
+            AnimatedContent(
+                targetState = track.artworkUri,
+                transitionSpec = { fadeIn(tween(450)) togetherWith fadeOut(tween(450)) },
+                label = "bg-art",
+            ) { uri ->
+                Artwork(
+                    uri,
+                    track.title,
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.35f
+                            scaleY = 1.35f
+                        }
+                        .blur(90.dp),
+                    0.dp,
+                )
+            }
             Box(
                 Modifier
                     .fillMaxSize()
@@ -290,33 +364,49 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                         modifier = Modifier.weight(1f).padding(top = 10.dp),
                     )
                 } else {
-                    val scale by animateFloatAsState(
-                        targetValue = if (state.isPlaying) 1f else 0.82f,
-                        animationSpec = spring(dampingRatio = 0.7f),
-                        label = "art-scale",
-                    )
                     Column(
                         Modifier.weight(1f),
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Artwork(
-                            track.artworkUri,
-                            track.title,
+                        Box(
                             Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .graphicsLayer {
-                                    scaleX = scale
-                                    scaleY = scale
-                                }
-                                .shadow(24.dp, RoundedCornerShape(12.dp), clip = false)
-                                .clickable(
-                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                    indication = null,
-                                ) { lyrics = true },
-                            12.dp,
-                        )
+                                .onSizeChanged { artW = it.width.toFloat().coerceAtLeast(1f) }
+                                .pointerInput(Unit) {
+                                    var total = 0f
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { total = 0f },
+                                        onHorizontalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            total += dragAmount
+                                        },
+                                        onDragEnd = {
+                                            val d = if (total <= 0f) 1 else -1
+                                            if (abs(total) > 72.dp.toPx()) artSwitch(d)
+                                            total = 0f
+                                        },
+                                        onDragCancel = { total = 0f },
+                                    )
+                                },
+                        ) {
+                            shownTrack?.let { t ->
+                                Artwork(
+                                    t.artworkUri,
+                                    t.title,
+                                    Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer { translationX = artX }
+                                        .shadow(24.dp, RoundedCornerShape(12.dp), clip = false)
+                                        .clickable(
+                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                            indication = null,
+                                        ) { lyrics = true },
+                                    12.dp,
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -324,25 +414,39 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                     Modifier.fillMaxWidth().padding(top = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            track.title,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.copyOnLongPress(track.title),
-                        )
-                        Text(
-                            track.artist,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = Color.White.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.copyOnLongPress(track.artist),
-                        )
-                        state.error?.let {
-                            Text(it, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
+                    AnimatedContent(
+                        targetState = shownTrack?.id,
+                        transitionSpec = {
+                            if (initialState == null) {
+                                fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                            } else {
+                                (slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { it * switchDir } + fadeIn(tween(220))) togetherWith
+                                    (slideOutHorizontally(tween(220, easing = FastOutSlowInEasing)) { -it * switchDir } + fadeOut(tween(160)))
+                            }
+                        },
+                        label = "track-meta",
+                        modifier = Modifier.weight(1f),
+                    ) { tid ->
+                        val t = state.queue.find { it.id == tid } ?: shownTrack ?: track ?: return@AnimatedContent
+                        Column {
+                            Text(
+                                t.title,
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = Color.White,
+                                maxLines = 1,
+                                modifier = Modifier.copyOnLongPress(t.title).basicMarquee(),
+                            )
+                            Text(
+                                t.artist,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.copyOnLongPress(t.artist),
+                            )
+                            state.error?.let {
+                                Text(it, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                     Box(
@@ -504,42 +608,52 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Filled.SkipPrevious,
-                        contentDescription = stringResource(R.string.cd_prev),
-                        tint = Color.White,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null,
-                                onClick = vm.player::previous,
-                            ),
-                    )
-                    Icon(
-                        if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = stringResource(if (state.isPlaying) R.string.cd_pause else R.string.cd_play),
-                        tint = Color.White,
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null,
-                                onClick = vm.player::toggle,
-                            ),
-                    )
-                    Icon(
-                        Icons.Filled.SkipNext,
-                        contentDescription = stringResource(R.string.cd_next),
-                        tint = Color.White,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null,
-                                onClick = vm.player::next,
-                            ),
-                    )
+                    val skipShape = RoundedCornerShape(18.dp)
+                    Box(
+                        Modifier
+                            .size(width = 56.dp, height = 44.dp)
+                            .clip(skipShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .clickable { artSwitch(-1) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.SkipPrevious,
+                            contentDescription = stringResource(R.string.cd_prev),
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .size(60.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .clickable(onClick = vm.player::toggle),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(if (state.isPlaying) R.string.cd_pause else R.string.cd_play),
+                            tint = Color(0xFF1C1C1E),
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .size(width = 56.dp, height = 44.dp)
+                            .clip(skipShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .clickable { artSwitch(1) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.SkipNext,
+                            contentDescription = stringResource(R.string.cd_next),
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
                 }
 
                 Row(

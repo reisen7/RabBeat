@@ -13,6 +13,7 @@ internal fun TrackEntity.toCandidate(): DupCandidate = DupCandidate(
     fileSize = fileSize,
     mimeType = mimeType,
     folder = folder,
+    hidden = hidden,
 )
 
 internal data class DupCandidate(
@@ -24,7 +25,12 @@ internal data class DupCandidate(
     val fileSize: Long?,
     val mimeType: String?,
     val folder: String?,
+    val hidden: Boolean = false,
 )
+
+/** Same non-null directory + same song identity means the same physical file. */
+internal fun sameFolder(a: String?, b: String?): Boolean =
+    a != null && a.trimEnd('/') == b?.trimEnd('/')
 
 internal data class DedupeResult(
     val keptIds: Set<String>,
@@ -39,7 +45,7 @@ internal data class DedupePlan(
 internal object TrackDeduper {
     private val LOSSLESS = setOf("flac", "wav", "x-wav", "alac", "ape", "aiff", "x-aiff")
 
-    fun dedupe(candidates: List<DupCandidate>, existingIds: Set<String>): DedupeResult {
+    fun dedupe(candidates: List<DupCandidate>, existingIds: Set<String>, hiddenIds: Set<String> = emptySet()): DedupeResult {
         val groups = mutableListOf<MutableList<IndexedValue<DupCandidate>>>()
         candidates.forEachIndexed { index, candidate ->
             val group = groups.firstOrNull { g -> g.any { isDuplicate(it.value, candidate) } }
@@ -54,6 +60,7 @@ internal object TrackDeduper {
         groups.forEach { group ->
             val winner = group.minWithOrNull(
                 compareBy(
+                    { if (it.value.id in hiddenIds) 1 else 0 },
                     { if (isLossless(it.value)) 0 else 1 },
                     { -(it.value.fileSize ?: 0L) },
                     { if (it.value.id in existingIds) 0 else 1 },
@@ -69,13 +76,18 @@ internal object TrackDeduper {
         return DedupeResult(keptIds = kept, replaced = replaced)
     }
 
-    fun plan(rows: List<DupCandidate>, existingIds: Set<String>, others: List<DupCandidate>): DedupePlan {
-        val dedupe = dedupe(rows, existingIds)
+    fun plan(rows: List<DupCandidate>, existingIds: Set<String>, others: List<DupCandidate>, hiddenIds: Set<String> = emptySet()): DedupePlan {
+        val dedupe = dedupe(rows, existingIds, hiddenIds)
         val replaced = dedupe.replaced.toMutableMap()
         val keptIds = linkedSetOf<String>()
         rows.forEach { row ->
             if (row.id !in dedupe.keptIds) return@forEach
-            val match = others.firstOrNull { isDuplicate(row, it) }
+            // Hidden tracks don't swallow newly imported files from elsewhere:
+            // hiding applies to that specific file. A same-directory (i.e. same
+            // file) hit on a hidden entry still merges so it stays hidden.
+            val match = others.firstOrNull {
+                isDuplicate(row, it) && (!it.hidden || sameFolder(row.folder, it.folder))
+            }
             if (match != null) {
                 replaced[row.id] = match.id
             } else {

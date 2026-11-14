@@ -91,10 +91,13 @@ class LocalMediaScanner @Inject constructor(
         val summary = database.withTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(SOURCE_ID).associateBy { it.id }
-            val others = trackDao.getOtherSources(SOURCE_ID)
+            val otherEntities = trackDao.getOtherSources(SOURCE_ID)
                 .filter { it.sourceId != NETEASE_SOURCE_ID }
-                .map { it.toCandidate() }
-            val plan = TrackDeduper.plan(rows.map { it.toCandidate() }, existing.keys, others)
+            val others = otherEntities.map { it.toCandidate() }
+            val hiddenIds = (existing.values + otherEntities)
+                .filter { it.hidden }
+                .mapTo(mutableSetOf()) { it.id }
+            val plan = TrackDeduper.plan(rows.map { it.toCandidate() }, existing.keys, others, hiddenIds)
             val kept = rows.filter { it.id in plan.keptIds }
             val losersByWinner = mutableMapOf<String, MutableList<TrackEntity>>()
             plan.replaced.forEach { (loser, winner) ->
@@ -109,7 +112,12 @@ class LocalMediaScanner @Inject constructor(
                     if (winner in plan.keptIds) {
                         losersByWinner.getOrPut(winner) { mutableListOf() } += entity
                     } else {
-                        trackDao.mergeStatsInto(winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt, entity.hidden)
+                        val winnerFolder = existing[winner]?.folder
+                            ?: others.firstOrNull { it.id == winner }?.folder
+                        trackDao.mergeStatsInto(
+                            winner, entity.isFavorite, entity.playCount, entity.lastPlayedAt, entity.addedAt,
+                            hidden = entity.hidden && sameFolder(entity.folder, winnerFolder),
+                        )
                     }
                 }
             }
@@ -163,7 +171,7 @@ class LocalMediaScanner @Inject constructor(
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.addedAt,
                     lyricUri = row.lyricUri ?: preserved?.lyricUri,
                     folder = row.folder,
-                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden },
+                    hidden = (preserved?.hidden ?: false) || losers.any { it.hidden && sameFolder(it.folder, row.folder) },
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }

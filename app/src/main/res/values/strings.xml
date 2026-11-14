@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RabBeat</string>
-    <string name="slogan">你的音乐，你的RabBeat。</string>
+    <string name="slogan">你的音乐，你的RabBeat</string>
 
     <string name="nav_home">首页</string>
     <string name="nav_library">曲库</string>
@@ -20,25 +20,25 @@
     <string name="cd_favorite">我喜欢</string>
 
     <string name="loading">正在把唱片搬出来…</string>
-    <string name="error_generic">出了点问题，再试一次。</string>
+    <string name="error_generic">出了点问题，再试一次</string>
     <string name="error_retry">重试</string>
     <string name="error_playback">这首暂时播不了</string>
 
-    <string name="empty_library">你的RabBeat还是空的，先导入一些音乐吧。</string>
+    <string name="empty_library">你的RabBeat还是空的，先导入一些音乐吧</string>
     <string name="empty_library_action">去导入</string>
     <string name="empty_search">没有找到与「%1$s」相关的音乐</string>
-    <string name="empty_downloads">还没有离线任务。在歌曲菜单里可以先下载。</string>
+    <string name="empty_downloads">还没有离线任务</string>
     <string name="empty_queue">队列是空的</string>
-    <string name="empty_player">选一首歌，从RabBeat里开始听。</string>
+    <string name="empty_player">选一首歌，从RabBeat里开始听</string>
     <string name="empty_folder">这个文件夹是空的</string>
     <string name="mini_nothing">还没有在播放</string>
 
     <string name="home_continue">继续播放</string>
     <string name="home_title">你的RabBeat</string>
     <string name="home_recent">最近添加</string>
-    <string name="home_recent_empty">最近还没有新加入的歌。</string>
+    <string name="home_recent_empty">最近还没有新加入的歌</string>
     <string name="home_sources">来源</string>
-    <string name="home_offline_banner">已回到RabBeat，离线也能听。</string>
+    <string name="home_offline_banner">已回到RabBeat，离线也能听</string>
     <string name="home_local_count">本地 %1$d 首</string>
     <string name="home_offline_filter">曲库已只显示能离线听的歌</string>
     <string name="smart_count">%1$d 首</string>
@@ -53,12 +53,12 @@
     <string name="sort_duration">时长</string>
     <string name="sort_plays">播放次数</string>
     <string name="home_history">播放记录</string>
-    <string name="home_history_body">最近听过的歌，以及每首歌播了多少次</string>
+    <string name="home_history_body">最近听过的歌</string>
     <string name="history_recent">最近播放</string>
     <string name="history_subtitle">最近的收听和播放次数</string>
     <string name="history_counts">播放次数</string>
-    <string name="history_empty">还没有播放记录。放一首歌，这里会按时间记下来。</string>
-    <string name="history_stats_empty">还没有次数。听过的歌会按播放次数排在这里。</string>
+    <string name="history_empty">还没有播放记录</string>
+    <string name="history_stats_empty">还没有次数</string>
     <string name="history_count">%1$d 次</string>
     <string name="history_summary">一共播放 %1$d 次，听过 %2$d 首歌</string>
     <string name="history_today">今天 %1$s</string>
@@ -76,10 +76,10 @@
     <string name="artist_meta">%1$d 张专辑 · %2$d 首</string>
 
     <string name="onboarding_title">把音乐搬进RabBeat</string>
-    <string name="onboarding_body">扫描这台手机上的音乐，放进同一个曲库。</string>
+    <string name="onboarding_body">扫描这台手机上的音乐，放进同一个曲库</string>
     <string name="onboarding_tag_offline">完全离线</string>
     <string name="onboarding_tag_private">只属于你</string>
-    <string name="onboarding_footer">扫描、主题和背景都可以随时在设置里调整。</string>
+    <string name="onboarding_footer">扫描、主题和背景都可以随时在设置里调整</string>
     <string name="source_local">扫描本机</string>
     <string name="source_local_body">读取这台设备上的音乐</string>
     <string name="source_server">添加服务器</string>
@@ -95,27 +95,27 @@
     <string name="test_ok">连接成功</string>
     <string name="test_fail">连不上。地址留空，或包含 fail，会得到这个结果。</string>
     <string name="scan_running">正在翻找唱片…</string>
-    <string name="scan_done">RabBeat里多了 %1$d 首歌。</string>
+    <string name="scan_done">RabBeat里多了 %1$d 首歌</string>
     <string name="scan_albums">%1$d 张专辑</string>
     <string name="scan_missing">%1$d 首缺了封面或年份</string>
-    <string name="scan_device_note">这些歌来自系统媒体库，和文件管理器里的「音频文件」是同一批。</string>
-    <string name="scan_empty">系统媒体库里没有可播放的音频。允许读取音频后，再扫一次。</string>
-    <string name="scan_failed">扫描时出了点问题，请再试一次。</string>
-    <string name="scan_cancelled">已取消扫描。</string>
+    <string name="scan_device_note">这些歌来自系统媒体库，和文件管理器里的「音频文件」是同一批</string>
+    <string name="scan_empty">系统媒体库里没有可播放的音频</string>
+    <string name="scan_failed">扫描时出了点问题，请再试一次</string>
+    <string name="scan_cancelled">已取消扫描</string>
     <string name="scanning_device">正在扫描本机音乐</string>
     <string name="scanning_folder">正在导入文件夹</string>
     <string name="scanning_rescan">正在重新扫描文件夹</string>
     <string name="scanning_found">已找到 %1$d 首</string>
     <string name="scanning_progress">已处理 %1$d / %2$d 首</string>
-    <string name="permission_denied">没有读取音频的权限，手机里的歌还看不到。</string>
+    <string name="permission_denied">没有读取音频的权限，手机里的歌还看不到</string>
     <string name="settings_scan_device">扫描本机音乐</string>
-    <string name="settings_scan_done">已从本机读入 %1$d 首歌。</string>
+    <string name="settings_scan_done">已从本机读入 %1$d 首歌</string>
     <string name="action_enter">进入曲库</string>
     <string name="action_back">返回</string>
 
     <string name="search_hint">歌曲、专辑、艺人</string>
     <string name="search_subtitle">在自己拥有的音乐里找</string>
-    <string name="search_hint_body">输入歌名、专辑或艺人。RabBeat只搜索你自己的曲库，不做推荐流。</string>
+    <string name="search_hint_body">输入歌名、专辑或艺人</string>
     <string name="search_recent">最近搜索</string>
     <string name="search_clear">清除</string>
     <string name="group_tracks">歌曲</string>
@@ -169,7 +169,7 @@
     <string name="settings_personalize_row">背景与强调色</string>
     <string name="settings_scan_body">按扫描规则扫描歌曲</string>
     <string name="scan_all_files_title">允许访问音乐下载文件夹？</string>
-    <string name="scan_all_files_body">网易云 .ncm、QQ音乐 .mgg/.mflac 不是普通音频文件，Android 11 及以上需要「所有文件访问」权限才能扫描下载目录里的加密歌曲。授权后会自动继续扫描；也可以只扫描系统媒体库。</string>
+    <string name="scan_all_files_body">网易云 .ncm、QQ音乐 .mgg/.mflac 不是普通音频文件，Android 11 及以上需要「所有文件访问」权限才能扫描下载目录里的加密歌曲</string>
     <string name="scan_all_files_grant">去授权</string>
     <string name="scan_all_files_skip">仅扫描媒体库</string>
     <string name="settings_scan_rules">扫描规则</string>
@@ -215,7 +215,7 @@
     <string name="settings_about">关于</string>
     <string name="settings_version">版本 %1$s</string>
     <string name="settings_licenses">开源许可</string>
-    <string name="licenses_body">RabBeat原型使用 Jetpack Compose、Media3、Room、Hilt 和 Coil，这些库为 Apache-2.0。应用本身的许可证尚未确定，文档建议开源前再评估 AGPL。</string>
+    <string name="licenses_body">RabBeat原型使用 Jetpack Compose、Media3、Room、Hilt 和 Coil，这些库为 Apache-2.0</string>
     <string name="settings_downloads">离线下载</string>
     <string name="source_connected">已连接</string>
     <string name="source_disconnected">离线</string>
@@ -225,7 +225,7 @@
     <string name="source_never_sync">还没有同步</string>
     <string name="action_sync">同步</string>
     <string name="remove_source_title">移除来源</string>
-    <string name="remove_source_body">曲目会从曲库里一起消失。</string>
+    <string name="remove_source_body">曲目会从曲库里一起消失</string>
     <string name="source_removed">来源已移除</string>
     <string name="source_synced">同步完成</string>
     <string name="type_local">本地</string>
@@ -246,7 +246,7 @@
     <string name="menu_remove_playlist">从歌单移除</string>
     <string name="menu_hide">从曲库隐藏</string>
     <string name="hide_dialog_title">隐藏这首歌？</string>
-    <string name="hide_dialog_body">「%1$s」会从曲库、歌单和搜索中消失，本机文件不会被删除。可以在「设置 → 已隐藏的歌曲」里恢复。</string>
+    <string name="hide_dialog_body">「%1$s」会从曲库、歌单和搜索中消失，本机文件不会被删除，可以在「设置 → 已隐藏的歌曲」里恢复</string>
     <string name="hide_dialog_confirm">隐藏</string>
     <string name="hidden_toast">已隐藏，可在设置中恢复</string>
     <string name="settings_hidden_tracks">已隐藏的歌曲</string>
@@ -257,7 +257,7 @@
     <string name="hidden_track_subtitle">%1$d 首</string>
     <string name="menu_hide_folder">隐藏这个文件夹</string>
     <string name="hide_folder_dialog_title">隐藏这个文件夹？</string>
-    <string name="hide_folder_dialog_body">「%1$s」里的 %2$d 首歌（含子文件夹）会从曲库、歌单和搜索中消失，本机文件不会被删除。可以在「设置 → 已隐藏的歌曲」里恢复。</string>
+    <string name="hide_folder_dialog_body">「%1$s」里的 %2$d 首歌（含子文件夹）会从曲库、歌单和搜索中消失，本机文件不会被删除，可以在「设置 → 已隐藏的歌曲」里恢复</string>
     <string name="playlist_add">添加到歌单</string>
     <string name="playlist_added">已添加到「%1$s」</string>
     <string name="playlist_already_added">「%1$s」已经在歌单里了</string>
@@ -269,7 +269,7 @@
     <string name="playlist_row">%1$s · %2$d 首</string>
     <string name="playlist_rename">改名</string>
     <string name="playlist_delete">删除歌单</string>
-    <string name="playlist_delete_body">歌单会被删掉，歌曲文件还在。</string>
+    <string name="playlist_delete_body">歌单会被删掉，歌曲文件还在</string>
     <string name="playlists_count">%1$d 个歌单</string>
     <string name="playlists_delete_count">删除（%1$d）</string>
     <string name="playlists_delete_title">删除 %1$d 个歌单？</string>
@@ -294,7 +294,7 @@
     <string name="toast_play_next_multi">已加入下一首播放 %1$d 首</string>
     <string name="playlist_added_multi">已添加 %1$d 首到「%2$s」</string>
     <string name="playlist_remove_tracks_title">从歌单删除 %1$d 首歌？</string>
-    <string name="playlist_remove_tracks_body">歌曲文件不会被删除。</string>
+    <string name="playlist_remove_tracks_body">歌曲文件不会被删除</string>
     <string name="playlist_cover_change">更换封面</string>
     <string name="playlist_cover_reset">恢复默认封面</string>
     <string name="playlist_cover_custom">自定义封面</string>
@@ -305,15 +305,15 @@
     <string name="library_playlists">歌单</string>
     <string name="settings_import_folder">选择文件夹导入</string>
     <string name="settings_rescan_folders">重新扫描文件夹</string>
-    <string name="settings_folder_done">已从文件夹读入 %1$d 首歌。</string>
-    <string name="settings_folder_existing">文件夹里的 %1$d 首歌都已在曲库中。</string>
-    <string name="settings_folder_partial">已读入 %1$d 首，其余 %2$d 首已在曲库中。</string>
+    <string name="settings_folder_done">已从文件夹读入 %1$d 首歌</string>
+    <string name="settings_folder_existing">文件夹里的 %1$d 首歌都已在曲库中</string>
+    <string name="settings_folder_partial">已读入 %1$d 首，其余 %2$d 首已在曲库中</string>
     <string name="settings_backup">备份歌单和记录</string>
     <string name="settings_restore">从备份恢复</string>
-    <string name="settings_restore_body">恢复会用备份里的歌单和播放记录覆盖现在的。</string>
-    <string name="settings_backup_done">备份已写好。</string>
-    <string name="settings_restore_done">已恢复 %1$d 个歌单，有 %2$d 首歌在这台手机上找不到。</string>
-    <string name="settings_backup_failed">备份没有完成。</string>
+    <string name="settings_restore_body">恢复会用备份里的歌单和播放记录覆盖现在的</string>
+    <string name="settings_backup_done">备份已写好</string>
+    <string name="settings_restore_done">已恢复 %1$d 个歌单，有 %2$d 首歌在这台手机上找不到</string>
+    <string name="settings_backup_failed">备份没有完成</string>
     <string name="lyrics_empty">这首歌还没有歌词</string>
     <string name="lyrics_fetch">在线匹配歌词</string>
     <string name="lyrics_import">导入歌词文件</string>
@@ -345,7 +345,7 @@
     <string name="appearance_title">个性化</string>
     <string name="appearance_subtitle">把RabBeat调成你喜欢的颜色</string>
     <string name="appearance_preview_title">RabBeat的角落</string>
-    <string name="appearance_preview_body">背景、模糊和强调色会实时应用到整个界面。</string>
+    <string name="appearance_preview_body">背景、模糊和强调色会实时应用到整个界面</string>
     <string name="appearance_background">背景图片</string>
     <string name="appearance_pick">自定义背景</string>
     <string name="appearance_no_image">还没有选择图片，默认使用纯色背景</string>
@@ -368,7 +368,7 @@
     <string name="appearance_reset_action">重置所有个性化设置</string>
     <string name="appearance_card_opacity">卡片不透明度</string>
     <string name="appearance_reset_title">恢复默认外观？</string>
-    <string name="appearance_reset_body">背景图会被移除，强调色、模糊、压暗、卡片不透明度和主题都会恢复成默认值。这个操作不能撤销。</string>
+    <string name="appearance_reset_body">背景图会被移除，强调色、模糊、压暗、卡片不透明度和主题都会恢复成默认值，这个操作不能撤销</string>
     <string name="appearance_reset_confirm">恢复默认</string>
     <string name="appearance_reset_done">已恢复默认外观</string>
     <string name="accent_violet">兔耳紫</string>
@@ -386,7 +386,7 @@
     <string name="drawer_about">关于RabBeat</string>
     <string name="drawer_go_home">返回桌面</string>
     <string name="drawer_version">RabBeat v%1$s</string>
-    <string name="drawer_about_body">RabBeat是一个离线优先的个人音乐播放器：扫描本机或导入文件夹，把歌收进一个曲库，再按自己的方式整理歌单。</string>
+    <string name="drawer_about_body">RabBeat是一个离线优先的个人音乐播放器：扫描本机或导入文件夹，把歌收进一个曲库，再按自己的方式整理歌单</string>
     <string name="cd_open_menu">打开菜单</string>
 
     <!-- 个人页 -->
@@ -399,25 +399,25 @@
     <string name="profile_section_playlists">我的歌单</string>
     <string name="profile_playlist_new">新建歌单</string>
     <string name="profile_manage_playlists">管理歌单</string>
-    <string name="profile_playlist_hint">点歌单封面进入，右上角可以新建</string>
+    <string name="profile_playlist_hint">点歌单封面进入</string>
     <string name="profile_playlist_hint_short">给喜欢的歌一个位置</string>
     <string name="profile_section_stats">播放数据</string>
     <string name="profile_week_plays">本周播放</string>
     <string name="profile_total_plays">累计播放</string>
     <string name="profile_tracks_heard">听过歌曲</string>
     <string name="profile_section_artists">常听艺人</string>
-    <string name="profile_artists_empty">还没有常听的艺人，多听几首就会出现在这里。</string>
+    <string name="profile_artists_empty">还没有常听的艺人</string>
     <string name="profile_section_recent">最近播放</string>
-    <string name="profile_recent_empty">还没有播放记录，放一首歌试试。</string>
+    <string name="profile_recent_empty">还没有播放记录，放一首歌试试</string>
     <string name="profile_view_all">全部</string>
     <string name="profile_plays_count">%1$d 次</string>
     <string name="profile_tracks_count">%1$d 首</string>
     <string name="settings_export_logs">导出诊断日志</string>
-    <string name="settings_export_logs_body">打包最近 7 天的运行日志，用于排查问题</string>
+    <string name="settings_export_logs_body">打包最近 7 天的运行日志</string>
     <string name="settings_logs_done">日志已导出</string>
     <string name="settings_logs_failed">日志导出失败</string>
     <string name="settings_check_update">检查更新</string>
-    <string name="settings_check_update_body">查看 GitHub 上是否有新版本</string>
+    <string name="settings_check_update_body">查看是否有新版本</string>
     <string name="update_available_title">发现新版本</string>
     <string name="update_available_body">最新版本 %1$s 已发布，要前往下载吗？</string>
     <string name="update_checking">正在检查更新…</string>

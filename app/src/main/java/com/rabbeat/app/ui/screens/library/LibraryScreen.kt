@@ -7,6 +7,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,6 +103,7 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.util.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlin.math.abs
 import androidx.paging.cachedIn
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
@@ -301,6 +304,20 @@ private fun LibraryBody(
     val gridState = rememberLazyGridState()
     val artistListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(initialPage = bundle.controls.tab.ordinal) { LibraryTab.entries.size }
+    LaunchedEffect(pagerState.currentPage) {
+        val tab = LibraryTab.entries[pagerState.currentPage]
+        if (tab != bundle.controls.tab) vm.setTab(tab)
+    }
+    LaunchedEffect(bundle.controls.tab) {
+        val target = bundle.controls.tab.ordinal
+        if (pagerState.currentPage == target) return@LaunchedEffect
+        if (abs(target - pagerState.currentPage) == 1) {
+            pagerState.animateScrollToPage(target)
+        } else {
+            pagerState.scrollToPage(target)
+        }
+    }
     val accent = LocalAccentPalette.current
 
     Column(Modifier.fillMaxSize()) {
@@ -360,8 +377,11 @@ private fun LibraryBody(
             onSelected = { vm.setTab(LibraryTab.entries[it]) },
         )
 
-        Box(Modifier.weight(1f)) {
-            when (bundle.controls.tab) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f),
+        ) { page ->
+            when (LibraryTab.entries[page]) {
                 LibraryTab.Tracks -> if (trackItems.itemCount == 0) {
                     EmptyState(stringResource(R.string.empty_library), Modifier.fillMaxSize())
                 } else {
