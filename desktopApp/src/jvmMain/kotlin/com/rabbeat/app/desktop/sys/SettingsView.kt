@@ -101,6 +101,9 @@ fun SettingsView(
 ) {
     val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf<String?>(null) }
+    var bgImage by remember { mutableStateOf(settings.bgImage) }
+    var dimLevel by remember { mutableStateOf(settings.dimLevel) }
+    var cardOpacity by remember { mutableStateOf(settings.cardOpacity) }
     val trackCount by db.trackDao().observeCount(
         TrackQuerySql.select(TrackQuery()),
     ).collectAsState(initial = 0)
@@ -286,17 +289,17 @@ fun SettingsView(
                         Column(Modifier.weight(1f)) {
                             Text("背景图片", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                             Text(
-                                if (settings.bgImage.isBlank()) "未设置自定义背景图" else File(settings.bgImage).name,
+                                if (bgImage.isBlank()) "未设置自定义背景图" else File(bgImage).name,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = palette.secondaryLabel,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        if (settings.bgImage.isNotBlank()) {
+                        if (bgImage.isNotBlank()) {
                             TextButton(
                                 onClick = {
-                                    settings.bgImage = ""
+                                    settings.bgImage = ""; bgImage = ""
                                     onAppearanceChange()
                                 },
                                 modifier = Modifier.hand(),
@@ -316,24 +319,24 @@ fun SettingsView(
                             modifier = Modifier.height(34.dp).hand(),
                         ) { Text("选择图片") }
                     }
-                    if (settings.bgImage.isNotBlank()) {
+                    if (bgImage.isNotBlank()) {
                         CardDivider()
                         SeekSettingRow(
                             label = "背景压暗",
-                            fraction = (settings.dimLevel / 0.8f).coerceIn(0f, 1f),
-                            display = "${(settings.dimLevel * 100).toInt()}%",
+                            fraction = (dimLevel / 0.8f).coerceIn(0f, 1f),
+                            display = "${(dimLevel * 100).toInt()}%",
                             onFractionChange = {
-                                settings.dimLevel = (it * 0.8f).coerceIn(0f, 0.8f)
+                                dimLevel = (it * 0.8f).coerceIn(0f, 0.8f); settings.dimLevel = dimLevel
                                 onAppearanceChange()
                             },
                         )
                         CardDivider()
                         SeekSettingRow(
                             label = "卡片不透明度",
-                            fraction = ((settings.cardOpacity - 0.1f) / 0.9f).coerceIn(0f, 1f),
-                            display = "${(settings.cardOpacity * 100).toInt()}%",
+                            fraction = ((cardOpacity - 0.1f) / 0.9f).coerceIn(0f, 1f),
+                            display = "${(cardOpacity * 100).toInt()}%",
                             onFractionChange = {
-                                settings.cardOpacity = (0.1f + it * 0.9f).coerceIn(0.1f, 1f)
+                                cardOpacity = (0.1f + it * 0.9f).coerceIn(0.1f, 1f); settings.cardOpacity = cardOpacity
                                 onAppearanceChange()
                             },
                         )
@@ -583,8 +586,8 @@ fun SettingsView(
             title = "裁剪背景图片",
             onConfirm = { out ->
                 cropSource = null
-                val prev = settings.bgImage
-                settings.bgImage = out.absolutePath
+                val prev = bgImage
+                settings.bgImage = out.absolutePath; bgImage = out.absolutePath
                 if (prev.isNotBlank()) {
                     runCatching {
                         val pf = File(prev)
