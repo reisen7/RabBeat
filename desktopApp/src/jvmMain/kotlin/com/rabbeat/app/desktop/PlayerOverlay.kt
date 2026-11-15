@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,10 +58,15 @@ fun PlayerOverlay(
     state: PlaybackUiState,
     player: PlaybackController,
     onCollapse: () -> Unit,
+    onVolume: ((Float) -> Unit)? = null,
 ) {
     val track = state.currentTrack
     val accent = LocalAccentPalette.current
     var showQueue by remember { mutableStateOf(false) }
+    var sleepMenu by remember { mutableStateOf(false) }
+    var volume by remember { mutableStateOf(1f) }
+    val lyrics = remember(track?.id) { track?.let { LyricLoader.loadFor(it) } ?: emptyList() }
+    val lyricIndex = LyricLoader.currentIndex(lyrics, state.positionMs)
 
     Column(
         Modifier
@@ -73,6 +81,23 @@ fun PlayerOverlay(
             Spacer(Modifier.weight(1f))
             Text("正在播放", style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { sleepMenu = true }) {
+                    Icon(
+                        Icons.Default.Bedtime,
+                        contentDescription = "睡眠定时",
+                        tint = if (state.sleepTimerRemainingMs != null) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.DropdownMenu(expanded = sleepMenu, onDismissRequest = { sleepMenu = false }) {
+                    listOf(0L to "关闭", 15 * 60_000L to "15 分钟", 30 * 60_000L to "30 分钟", 45 * 60_000L to "45 分钟", 60 * 60_000L to "1 小时").forEach { (ms, label) ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = { player.setSleepTimer(ms, fade = true); sleepMenu = false },
+                        )
+                    }
+                }
+            }
             IconButton(onClick = { showQueue = !showQueue }) {
                 Icon(
                     Icons.AutoMirrored.Filled.QueueMusic,
@@ -110,6 +135,16 @@ fun PlayerOverlay(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (lyrics.isNotEmpty()) {
+                Text(
+                    if (lyricIndex >= 0) lyrics[lyricIndex].text else "♪",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = accent.color,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
 
             Slider(
                 value = if (state.durationMs > 0) (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f,
@@ -164,6 +199,26 @@ fun PlayerOverlay(
                         contentDescription = "循环",
                         tint = if (state.repeatMode != RepeatMode.OFF) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+
+            if (onVolume != null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (volume == 0f) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = "音量",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Slider(
+                        value = volume,
+                        onValueChange = { volume = it; onVolume(it) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                    Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
                 }
             }
         }

@@ -8,6 +8,7 @@ plugins {
 
 compose.resources {
     packageOfResClass = "com.rabbeat.app.sharedui.generated.resources"
+    publicResClass = true
 }
 
 kotlin {

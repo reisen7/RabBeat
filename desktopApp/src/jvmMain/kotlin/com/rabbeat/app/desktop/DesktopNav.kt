@@ -1,0 +1,43 @@
+package com.rabbeat.app.desktop
+
+import java.io.File
+import java.util.Properties
+
+/** Tiny in-app navigation state — desktop has no back stack framework. */
+sealed interface DesktopRoute {
+    data object Library : DesktopRoute
+    data object RecentAdded : DesktopRoute
+    data object MostPlayed : DesktopRoute
+    data object Playlists : DesktopRoute
+    data class AlbumDetail(val albumId: String) : DesktopRoute
+    data class ArtistDetail(val artistId: String) : DesktopRoute
+    data class PlaylistDetail(val playlistId: String) : DesktopRoute
+    data class FolderDetail(val path: String) : DesktopRoute
+    data object HiddenSongs : DesktopRoute
+    data object Settings : DesktopRoute
+}
+
+/** Minimal persisted desktop preferences (properties file under ~/.rabbeat). */
+class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "settings.properties")) {
+
+    var themeMode: String = load("themeMode", "DARK")
+        set(value) { field = value; save("themeMode", value) }
+
+    var accent: String = load("accent", "ROSE")
+        set(value) { field = value; save("accent", value) }
+
+    private fun load(key: String, fallback: String): String =
+        runCatching { Properties().apply { file.inputStream().use(::load) }.getProperty(key) }
+            .getOrNull() ?: fallback
+
+    private fun save(key: String, value: String) {
+        runCatching {
+            file.parentFile?.mkdirs()
+            val props = Properties().apply {
+                if (file.isFile) file.inputStream().use(::load)
+                setProperty(key, value)
+            }
+            file.outputStream().use { props.store(it, "rabbeat") }
+        }
+    }
+}

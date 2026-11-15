@@ -153,7 +153,8 @@ class DesktopPlayerController(
         sleepJob?.cancel()
         if (durationMs <= 0L) {
             sleepRemaining = null
-            setGain(1f)
+            fadeFactor = 1f
+            applyGain()
             publish(_state.value.isPlaying)
             return
         }
@@ -163,18 +164,26 @@ class DesktopPlayerController(
                 val remain = deadline - System.currentTimeMillis()
                 if (remain <= 0L) {
                     if (_state.value.isPlaying) toggle()
-                    setGain(1f)
+                    fadeFactor = 1f
+                    applyGain()
                     sleepRemaining = null
                     publish(false)
                     persist()
                     break
                 }
-                if (fade && remain < 15_000L) setGain((remain / 15_000f).coerceIn(0f, 1f))
+                fadeFactor = if (fade && remain < 15_000L) (remain / 15_000f).coerceIn(0f, 1f) else 1f
+                applyGain()
                 sleepRemaining = remain
                 publish(_state.value.isPlaying)
                 delay(250)
             }
         }
+    }
+
+    /** Desktop-only volume — not part of the shared interface (Android uses system volume). */
+    fun setVolume(fraction: Float) {
+        userVolume = fraction.coerceIn(0f, 1f)
+        applyGain()
     }
 
     override fun playNext(track: Track) = playNext(listOf(track))
@@ -342,6 +351,11 @@ class DesktopPlayerController(
         }
     }
 
+    /** Flush state and release the audio line before process exit. */
+    fun shutdown() {
+        scope.launch { persist() }.invokeOnCompletion { closeLine() }
+    }
+
     private fun closeLine() {
         runCatching { stream?.close() }
         runCatching { line?.close() }
@@ -371,6 +385,11 @@ class DesktopPlayerController(
         val l = line ?: return _state.value.positionMs
         return basePositionMs + (l.longFramePosition * 1000L / 44100L)
     }
+
+    @Volatile private var userVolume = 1f
+    @Volatile private var fadeFactor = 1f
+
+    private fun applyGain() = setGain(userVolume * fadeFactor)
 
     private fun setGain(fraction: Float) {
         runCatching {

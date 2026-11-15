@@ -53,6 +53,9 @@ fun DesktopLibrary(
     player: PlaybackController,
     tracks: List<TrackEntity>,
     currentTrackId: String?,
+    onOpenAlbum: (String) -> Unit,
+    onOpenArtist: (String) -> Unit,
+    onOpenFolder: (String) -> Unit,
 ) {
     val albums by db.albumDao().observeAll().collectAsState(initial = emptyList())
     val artists by db.artistDao().observeAll().collectAsState(initial = emptyList())
@@ -94,21 +97,12 @@ fun DesktopLibrary(
             userScrollEnabled = query.isBlank(),
         ) { page ->
             when (page) {
-                0 -> TrackList(filtered, currentTrackId) { i ->
+                0 -> TrackList(db, player, filtered, currentTrackId) { i ->
                     player.playQueue(filtered.map { it.toDomain(null) }, i)
                 }
-                1 -> AlbumList(albums, tracks) { album ->
-                    val albumTracks = tracks.filter { it.albumId == album.id }
-                    if (albumTracks.isNotEmpty()) player.playQueue(albumTracks.map { it.toDomain(null) }, 0)
-                }
-                2 -> ArtistList(artists, tracks) { artist ->
-                    val artistTracks = tracks.filter { it.artistId == artist.id }
-                    if (artistTracks.isNotEmpty()) player.playQueue(artistTracks.map { it.toDomain(null) }, 0)
-                }
-                else -> FolderList(folders, tracks) { folder ->
-                    val folderTracks = tracks.filter { it.folderPath == folder.path }
-                    if (folderTracks.isNotEmpty()) player.playQueue(folderTracks.map { it.toDomain(null) }, 0)
-                }
+                1 -> AlbumList(albums) { album -> album.id?.let(onOpenAlbum) }
+                2 -> ArtistList(artists) { artist -> artist.id?.let(onOpenArtist) }
+                else -> FolderList(folders) { folder -> onOpenFolder(folder.path) }
             }
         }
     }
@@ -118,52 +112,66 @@ private val TrackEntity.folderPath: String
     get() = folder?.trim()?.takeIf { it.isNotEmpty() } ?: "本地"
 
 @Composable
-private fun TrackList(tracks: List<TrackEntity>, currentTrackId: String?, onPlay: (Int) -> Unit) {
+private fun TrackList(
+    db: RabBeatDatabase,
+    player: PlaybackController,
+    tracks: List<TrackEntity>,
+    currentTrackId: String?,
+    onPlay: (Int) -> Unit,
+) {
     if (tracks.isEmpty()) {
         EmptyState(message = "没有歌曲，点上方「导入文件夹」扫描本地音乐")
         return
     }
+    val scope = rememberCoroutineScope()
     LazyColumn(Modifier.fillMaxSize()) {
         itemsIndexed(tracks, key = { _, t -> t.id }) { i, track ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onPlay(i) }
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            TrackContextMenu(
+                track = track,
+                db = db,
+                player = player,
+                onHide = { scope.launch { db.trackDao().setHidden(listOf(track.id), true) } },
             ) {
-                Artwork(
-                    artworkUri = track.artworkUri,
-                    title = track.title,
-                    modifier = Modifier.size(46.dp),
-                    cornerRadius = 10.dp,
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        track.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (track.id == currentTrackId) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPlay(i) }
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Artwork(
+                        artworkUri = track.artworkUri,
+                        title = track.title,
+                        modifier = Modifier.size(46.dp),
+                        cornerRadius = 10.dp,
                     )
-                    Text(
-                        "${track.artist} · ${track.album}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            track.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (track.id == currentTrackId) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${track.artist} · ${track.album}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(formatMs(track.durationMs), style = MaterialTheme.typography.bodySmall)
                 }
-                Text(formatMs(track.durationMs), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
 }
 
 @Composable
-private fun AlbumList(albums: List<AlbumEntity>, tracks: List<TrackEntity>, onPlay: (AlbumEntity) -> Unit) {
+private fun AlbumList(albums: List<AlbumEntity>, onOpen: (AlbumEntity) -> Unit) {
     if (albums.isEmpty()) {
         EmptyState(message = "没有专辑，导入音乐后自动按标签分组")
         return
@@ -173,7 +181,7 @@ private fun AlbumList(albums: List<AlbumEntity>, tracks: List<TrackEntity>, onPl
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPlay(album) }
+                    .clickable { onOpen(album) }
                     .padding(horizontal = 20.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -198,7 +206,7 @@ private fun AlbumList(albums: List<AlbumEntity>, tracks: List<TrackEntity>, onPl
 }
 
 @Composable
-private fun ArtistList(artists: List<ArtistEntity>, tracks: List<TrackEntity>, onPlay: (ArtistEntity) -> Unit) {
+private fun ArtistList(artists: List<ArtistEntity>, onOpen: (ArtistEntity) -> Unit) {
     if (artists.isEmpty()) {
         EmptyState(message = "没有艺人，导入音乐后自动按标签分组")
         return
@@ -208,7 +216,7 @@ private fun ArtistList(artists: List<ArtistEntity>, tracks: List<TrackEntity>, o
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPlay(artist) }
+                    .clickable { onOpen(artist) }
                     .padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -226,7 +234,7 @@ private fun ArtistList(artists: List<ArtistEntity>, tracks: List<TrackEntity>, o
 }
 
 @Composable
-private fun FolderList(folders: List<FolderSummary>, tracks: List<TrackEntity>, onPlay: (FolderSummary) -> Unit) {
+private fun FolderList(folders: List<FolderSummary>, onOpen: (FolderSummary) -> Unit) {
     if (folders.isEmpty()) {
         EmptyState(message = "没有文件夹，导入音乐后按目录分组")
         return
@@ -236,7 +244,7 @@ private fun FolderList(folders: List<FolderSummary>, tracks: List<TrackEntity>, 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPlay(folder) }
+                    .clickable { onOpen(folder) }
                     .padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
