@@ -15,8 +15,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,8 +56,12 @@ fun PlaylistListView(
 ) {
     val playlists by db.playlistDao().observeAll().collectAsState(initial = emptyList())
     val counts by db.playlistDao().observeVisibleCounts().collectAsState(initial = emptyList())
+    val artworks by db.playlistDao().observeLatestArtwork().collectAsState(initial = emptyList())
     var creating by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    var importResult by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val importer = remember { NeteaseImporter(db) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -64,6 +70,13 @@ fun PlaylistListView(
         ) {
             Text("歌单", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
+            importResult?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+            }
+            IconButton(onClick = { importing = true }) {
+                Icon(Icons.Default.CloudDownload, contentDescription = "导入网易云歌单")
+            }
             IconButton(onClick = { creating = true }) {
                 Icon(Icons.Default.Add, contentDescription = "新建歌单")
             }
@@ -80,6 +93,14 @@ fun PlaylistListView(
                             .padding(horizontal = 20.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Artwork(
+                            artworkUri = playlist.coverUri
+                                ?: artworks.firstOrNull { it.playlistId == playlist.id }?.artworkUri,
+                            title = playlist.name,
+                            modifier = Modifier.size(44.dp),
+                            cornerRadius = 10.dp,
+                        )
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(playlist.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(
@@ -124,6 +145,52 @@ fun PlaylistListView(
             dismissButton = { TextButton(onClick = { creating = false }) { Text("取消") } },
         )
     }
+
+    if (importing) {
+        var link by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { if (busy == null) importing = false },
+            title = { Text("导入网易云歌单") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = link,
+                        onValueChange = { link = it },
+                        singleLine = true,
+                        placeholder = { Text("歌单链接或 ID") },
+                        enabled = busy == null,
+                    )
+                    busy?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = link.isNotBlank() && busy == null,
+                    onClick = {
+                        scope.launch {
+                            busy = "解析中…"
+                            runCatching {
+                                importer.import(link) { d, t -> busy = "导入中 $d/$t" }
+                            }.onSuccess { r ->
+                                importResult = "「${r.playlistName}」导入 ${r.imported} 首" +
+                                    (if (r.matched > 0) "，匹配本地 ${r.matched}" else "") +
+                                    (if (r.skipped > 0) "，跳过 ${r.skipped}" else "")
+                                importing = false
+                            }.onFailure { e ->
+                                busy = null
+                                importResult = e.message ?: "导入失败"
+                                importing = false
+                            }
+                        }
+                    },
+                ) { Text("导入") }
+            },
+            dismissButton = {
+                TextButton(enabled = busy == null, onClick = { importing = false }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -149,6 +216,16 @@ fun PlaylistDetailView(
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "返回") }
             Text(playlist?.name ?: "歌单", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             var renaming by remember { mutableStateOf(false) }
+            IconButton(onClick = {
+                pickImage { file ->
+                    scope.launch {
+                        val dest = cropSquareToArt(file, playlistId)
+                        if (dest != null) db.playlistDao().setCover(playlistId, dest.toURI().toString())
+                    }
+                }
+            }) {
+                Icon(Icons.Default.Image, contentDescription = "设置封面")
+            }
             IconButton(onClick = { renaming = true }) {
                 Icon(Icons.Default.Edit, contentDescription = "重命名")
             }
@@ -285,6 +362,33 @@ private fun TrackRowSurface(
         verticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
+
+private fun pickImage(onPicked: (java.io.File) -> Unit) {
+    javax.swing.SwingUtilities.invokeLater {
+        val chooser = javax.swing.JFileChooser(javax.swing.filechooser.FileSystemView.getFileSystemView().homeDirectory).apply {
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("图片", "jpg", "jpeg", "png", "webp")
+        }
+        if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+            onPicked(chooser.selectedFile)
+        }
+    }
+}
+
+/** Center-crop to a 512px square and persist under ~/.rabbeat/art as the playlist cover. */
+private fun cropSquareToArt(src: java.io.File, playlistId: String): java.io.File? = runCatching {
+    val img = javax.imageio.ImageIO.read(src) ?: return null
+    val side = minOf(img.width, img.height)
+    val cropped = img.getSubimage((img.width - side) / 2, (img.height - side) / 2, side, side)
+    val scaled = java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_RGB)
+    scaled.createGraphics().apply {
+        setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+        drawImage(cropped, 0, 0, 512, 512, null)
+        dispose()
+    }
+    val out = java.io.File(LibraryScanner.dataDir(), "art/pl_$playlistId.jpg").apply { parentFile?.mkdirs() }
+    javax.imageio.ImageIO.write(scaled, "jpg", out)
+    out
+}.getOrNull()
 
 suspend fun addToPlaylist(db: RabBeatDatabase, playlistId: String, tracks: List<Track>) {
     val existing = db.playlistDao().trackCount(playlistId)

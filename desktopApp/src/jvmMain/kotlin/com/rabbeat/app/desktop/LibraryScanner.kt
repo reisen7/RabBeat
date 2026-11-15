@@ -47,10 +47,23 @@ class LibraryScanner(private val db: RabBeatDatabase) {
             db.trackDao().upsertAll(batch)
             db.albumDao().upsertAll(albums.values.toList())
             db.artistDao().upsertAll(artists.values.toList())
+            DesktopLog.i("Scanner", "scan ${root.absolutePath}: ${batch.size} tracks imported")
             batch.size
         } finally {
             running = false
         }
+    }
+
+    /** Drop DB rows whose backing file disappeared (moved/deleted outside the app). */
+    suspend fun prune(): Int = withContext(Dispatchers.IO) {
+        val stale = db.trackDao()
+            .query(androidx.room.RoomRawQuery("SELECT * FROM tracks"))
+            .filter { track ->
+                track.uri.startsWith("file:") &&
+                    runCatching { !java.io.File(java.net.URI(track.uri)).exists() }.getOrDefault(true)
+            }
+        if (stale.isNotEmpty()) db.trackDao().deleteByIds(stale.map { it.id })
+        stale.size
     }
 
     private fun entityFor(file: File, root: File, now: Long): TrackEntity? = runCatching {

@@ -261,7 +261,7 @@ class DesktopPlayerController(
         closeLine()
         playJob = scope.launch(Dispatchers.IO) {
             val prepared = prepareLine(track, seekMs) ?: run {
-                error = "无法解码 ${File(URI(track.uri)).name}"
+                error = "无法解码 ${track.title}"
                 publish(false)
                 return@launch
             }
@@ -284,7 +284,7 @@ class DesktopPlayerController(
     /** Returns the open line + decoded PCM stream, or null when undecodable. */
     private suspend fun prepareLine(track: Track, seekMs: Long): Pair<SourceDataLine, AudioInputStream>? = withContext(Dispatchers.IO) {
         runCatching {
-            val source = resolveFile(track)
+            val source = resolveSource(track)
             val raw = AudioSystem.getAudioInputStream(source)
             val pcm = AudioFormat(
                 AudioFormat.Encoding.PCM_SIGNED,
@@ -299,6 +299,23 @@ class DesktopPlayerController(
             error = it.message
             null
         }
+    }
+
+    /** Remote tracks are fetched into ~/.rabbeat/cache on first play, then read locally. */
+    private fun resolveSource(track: Track): File {
+        if (!track.uri.startsWith("http")) return resolveFile(track)
+        val dir = File(LibraryScanner.dataDir(), "cache").apply { mkdirs() }
+        val cached = File(dir, "${track.id}.audio")
+        if (cached.isFile && cached.length() > 0) return cached
+        val tmp = File(dir, "${track.id}.part")
+        runCatching {
+            URI(track.uri).toURL().openStream().use { input ->
+                tmp.outputStream().use { input.copyTo(it, 64 * 1024) }
+            }
+            if (!tmp.renameTo(cached)) tmp.copyTo(cached, overwrite = true)
+        }.onFailure { tmp.delete() }
+        return if (cached.isFile && cached.length() > 0) cached
+        else throw java.io.IOException("下载失败: ${track.title}")
     }
 
     private fun resolveFile(track: Track): File {

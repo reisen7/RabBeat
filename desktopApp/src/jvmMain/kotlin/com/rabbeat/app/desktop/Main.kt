@@ -23,6 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -104,20 +106,64 @@ private fun App(
     player: DesktopPlayerController,
     scope: CoroutineScope,
     settings: DesktopSettings,
+    playerOpenState: MutableState<Boolean>,
     onThemeChanged: () -> Unit,
+    onAppearanceChanged: () -> Unit,
 ) {
     val tracks by db.trackDao().observeAll().collectAsState(initial = emptyList())
     val state by player.state.collectAsState()
     var scanText by remember { mutableStateOf<String?>(null) }
-    var playerOpen by remember { mutableStateOf(false) }
+    var playerOpen by playerOpenState
     var route by remember { mutableStateOf<DesktopRoute>(DesktopRoute.Library) }
     val backStack = remember { mutableStateListOf<DesktopRoute>() }
     val scanner = remember { LibraryScanner(db) }
+    val liked = remember { com.rabbeat.app.data.local.LikedPlaylist(db.playlistDao(), db.trackDao()) }
+
+    // Startup housekeeping: prune dead files + ensure the "我喜欢" system playlist.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        scanner.prune()
+        liked.ensure()
+    }
 
     fun push(r: DesktopRoute) { backStack.add(route); route = r }
     fun pop() { route = backStack.removeLastOrNull() ?: DesktopRoute.Library }
     fun topLevel(r: DesktopRoute) { backStack.clear(); route = r }
 
+    // Desktop notifications on track change.
+    var lastNotified by remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(state.currentTrack?.id) {
+        val t = state.currentTrack
+        if (t != null && t.id != lastNotified && state.isPlaying) {
+            lastNotified = t.id
+            DesktopNotify.trackChanged(t.title, t.artist)
+        }
+    }
+
+    val bgPath = settings.bgImage
+    val bgBitmap = remember(bgPath) {
+        bgPath.takeIf { it.isNotBlank() }
+            ?.let { runCatching { androidx.compose.ui.res.loadImageBitmap(java.io.File(it).inputStream()) }.getOrNull() }
+    }
+
+    CompositionLocalProvider(
+        LocalLikedPlaylist provides liked,
+        com.rabbeat.app.ui.components.LocalHasBackgroundImage provides (bgBitmap != null),
+        com.rabbeat.app.ui.components.LocalCardOpacity provides settings.cardOpacity,
+    ) {
+    Box(Modifier.fillMaxSize()) {
+        if (bgBitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bgBitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+            Box(
+                Modifier.fillMaxSize().background(
+                    MaterialTheme.colorScheme.background.copy(alpha = settings.dimLevel.coerceIn(0f, 0.9f)),
+                ),
+            )
+        }
     Row(Modifier.fillMaxSize()) {
         // Left nav rail — RabBeat side navigation
         Column(
@@ -132,6 +178,9 @@ private fun App(
             NavRailItem("最近添加", route is DesktopRoute.RecentAdded) { topLevel(DesktopRoute.RecentAdded) }
             NavRailItem("最常播放", route is DesktopRoute.MostPlayed) { topLevel(DesktopRoute.MostPlayed) }
             NavRailItem("歌单", route is DesktopRoute.Playlists || route is DesktopRoute.PlaylistDetail) { topLevel(DesktopRoute.Playlists) }
+            NavRailItem("我喜欢", false) {
+                scope.launch { liked.ensure(); push(DesktopRoute.PlaylistDetail(com.rabbeat.app.data.local.LikedPlaylist.ID)) }
+            }
             NavRailItem("已隐藏", route is DesktopRoute.HiddenSongs) { topLevel(DesktopRoute.HiddenSongs) }
             Spacer(Modifier.weight(1f))
             NavRailItem("设置", route is DesktopRoute.Settings) { topLevel(DesktopRoute.Settings) }
@@ -191,20 +240,28 @@ private fun App(
                             onBack = ::pop,
                         )
                     }
-                    is DesktopRoute.AlbumDetail -> TrackListScreen(
-                        db = db, player = player,
-                        title = tracks.firstOrNull { it.albumId == r.albumId }?.album ?: "专辑",
-                        tracks = tracks.filter { it.albumId == r.albumId },
-                        currentTrackId = state.currentTrack?.id,
-                        onBack = ::pop,
-                    )
-                    is DesktopRoute.ArtistDetail -> TrackListScreen(
-                        db = db, player = player,
-                        title = tracks.firstOrNull { it.artistId == r.artistId }?.artist ?: "艺人",
-                        tracks = tracks.filter { it.artistId == r.artistId },
-                        currentTrackId = state.currentTrack?.id,
-                        onBack = ::pop,
-                    )
+                    is DesktopRoute.AlbumDetail -> {
+                        val albumTracks by db.trackDao().observeByAlbum(r.albumId)
+                            .collectAsState(initial = emptyList())
+                        TrackListScreen(
+                            db = db, player = player,
+                            title = albumTracks.firstOrNull()?.album ?: "专辑",
+                            tracks = albumTracks,
+                            currentTrackId = state.currentTrack?.id,
+                            onBack = ::pop,
+                        )
+                    }
+                    is DesktopRoute.ArtistDetail -> {
+                        val artistTracks by db.trackDao().observeByArtist(r.artistId)
+                            .collectAsState(initial = emptyList())
+                        TrackListScreen(
+                            db = db, player = player,
+                            title = artistTracks.firstOrNull()?.artist ?: "艺人",
+                            tracks = artistTracks,
+                            currentTrackId = state.currentTrack?.id,
+                            onBack = ::pop,
+                        )
+                    }
                     is DesktopRoute.FolderDetail -> TrackListScreen(
                         db = db, player = player,
                         title = r.path.ifBlank { "本地" },
@@ -219,7 +276,10 @@ private fun App(
                     is DesktopRoute.HiddenSongs -> HiddenSongsView(db = db, onBack = ::pop)
                     is DesktopRoute.Settings -> SettingsView(
                         settings = settings,
+                        scanner = scanner,
+                        db = db,
                         onThemeChange = onThemeChanged,
+                        onAppearanceChange = onAppearanceChanged,
                         onOpenHidden = { push(DesktopRoute.HiddenSongs) },
                         onBack = ::pop,
                     )
@@ -236,6 +296,8 @@ private fun App(
             )
         }
     }
+    }
+    }
 
     AnimatedVisibility(
         visible = playerOpen,
@@ -247,6 +309,7 @@ private fun App(
             player = player,
             onCollapse = { playerOpen = false },
             onVolume = { player.setVolume(it) },
+            db = db,
         )
     }
 }
@@ -284,8 +347,14 @@ fun main() = application {
     val player = remember { DesktopPlayerController(db, appScope) }
     val settings = remember { DesktopSettings() }
     var themeTick by remember { mutableStateOf(0) }
+    var appearanceTick by remember { mutableStateOf(0) }
     var windowVisible by remember { mutableStateOf(true) }
+    val playerOpen = remember { mutableStateOf(false) }
     val playState by player.state.collectAsState()
+    val windowState = rememberWindowState(
+        width = settings.windowW.dp,
+        height = settings.windowH.dp,
+    )
 
     Tray(
         icon = painterResource(Res.drawable.ic_launcher_foreground),
@@ -297,20 +366,30 @@ fun main() = application {
             Item("下一首", onClick = { player.next() })
             Item("上一首", onClick = { player.previous() })
             Separator()
-            Item("退出", onClick = { player.shutdown(); exitApplication() })
+            Item("退出", onClick = {
+                settings.windowW = windowState.size.width.value.toInt()
+                settings.windowH = windowState.size.height.value.toInt()
+                player.shutdown()
+                exitApplication()
+            })
         },
     )
 
     if (windowVisible) Window(
-        onCloseRequest = { windowVisible = false },  // close → minimize to tray
+        onCloseRequest = {
+            settings.windowW = windowState.size.width.value.toInt()
+            settings.windowH = windowState.size.height.value.toInt()
+            windowVisible = false  // close → minimize to tray
+        },
         title = "RabBeat",
-        state = rememberWindowState(width = 1080.dp, height = 720.dp),
+        state = windowState,
         onPreviewKeyEvent = { e ->
             if (e.type != KeyEventType.KeyUp) return@Window false
             when {
                 e.isCtrlPressed && e.key == Key.DirectionRight -> { player.next(); true }
                 e.isCtrlPressed && e.key == Key.DirectionLeft -> { player.previous(); true }
                 e.isCtrlPressed && e.key == Key.Spacebar -> { player.toggle(); true }
+                e.key == Key.Escape && playerOpen.value -> { playerOpen.value = false; true }
                 else -> false
             }
         },
@@ -319,7 +398,13 @@ fun main() = application {
         val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
         RabBeatTheme(themeMode = themeMode, accentTheme = accent) {
             Surface(Modifier.fillMaxSize()) {
-                App(db, player, appScope, settings, onThemeChanged = { themeTick++ })
+                androidx.compose.runtime.key(appearanceTick) {
+                    App(
+                        db, player, appScope, settings, playerOpen,
+                        onThemeChanged = { themeTick++ },
+                        onAppearanceChanged = { appearanceTick++ },
+                    )
+                }
             }
         }
     }

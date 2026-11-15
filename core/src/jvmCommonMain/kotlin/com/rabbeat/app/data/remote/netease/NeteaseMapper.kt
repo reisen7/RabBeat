@@ -56,7 +56,7 @@ object NeteaseMapper {
         folder = FOLDER,
     )
 
-    internal fun toCandidate(song: NeSong): DupCandidate = DupCandidate(
+    fun toCandidate(song: NeSong): DupCandidate = DupCandidate(
         id = trackId(song),
         title = song.name,
         artist = artistName(song),

@@ -26,6 +26,21 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var accent: String = load("accent", "ROSE")
         set(value) { field = value; save("accent", value) }
 
+    var bgImage: String = load("bgImage", "")
+        set(value) { field = value; save("bgImage", value) }
+
+    var dimLevel: Float = load("dimLevel", "0.35").toFloatOrNull() ?: 0.35f
+        set(value) { field = value; save("dimLevel", value.toString()) }
+
+    var cardOpacity: Float = load("cardOpacity", "0.3").toFloatOrNull() ?: 0.3f
+        set(value) { field = value; save("cardOpacity", value.toString()) }
+
+    var windowW: Int = load("windowW", "1080").toIntOrNull() ?: 1080
+        set(value) { field = value; save("windowW", value.toString()) }
+
+    var windowH: Int = load("windowH", "720").toIntOrNull() ?: 720
+        set(value) { field = value; save("windowH", value.toString()) }
+
     private fun load(key: String, fallback: String): String =
         runCatching { Properties().apply { file.inputStream().use(::load) }.getProperty(key) }
             .getOrNull() ?: fallback

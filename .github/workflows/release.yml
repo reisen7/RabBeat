@@ -159,3 +159,59 @@ jobs:
       - name: Remove keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
+
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            name="${INPUT_VERSION#v}"
+            tag="v$name"
+          else
+            tag="${GITHUB_REF_NAME}"
+            name="${tag#v}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Build desktop app image
+        run: |
+          ./gradlew :desktopApp:createDistributable --no-daemon --stacktrace
+
+      - name: Package portable zip
+        run: |
+          $app = "desktopApp/build/compose/binaries/main/app/RabBeat"
+          if (-not (Test-Path $app)) { Get-ChildItem -Recurse "desktopApp/build/compose/binaries" | Select-Object FullName; throw "app image not found" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zip = "dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip"
+          Compress-Archive -Path "$app/*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path $zip -Leaf)"
+
+      - name: Publish desktop artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: |
+            dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip
+            dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip.sha256

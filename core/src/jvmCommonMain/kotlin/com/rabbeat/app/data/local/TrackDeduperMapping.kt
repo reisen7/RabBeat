@@ -2,7 +2,7 @@ package com.rabbeat.app.data.local
 
 import com.rabbeat.app.data.local.entity.TrackEntity
 
-internal fun TrackEntity.toCandidate(): DupCandidate = DupCandidate(
+fun TrackEntity.toCandidate(): DupCandidate = DupCandidate(
     id = id,
     title = title,
     artist = artist,

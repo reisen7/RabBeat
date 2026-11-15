@@ -18,7 +18,11 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -38,6 +42,7 @@ import com.rabbeat.app.data.local.entity.AlbumEntity
 import com.rabbeat.app.data.local.entity.ArtistEntity
 import com.rabbeat.app.data.local.entity.TrackEntity
 import com.rabbeat.app.data.local.mapper.toDomain
+import com.rabbeat.app.domain.model.TrackSort
 import com.rabbeat.app.domain.model.FolderSummary
 import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.Artwork
@@ -62,26 +67,62 @@ fun DesktopLibrary(
     val folders by db.trackDao().observeFolders().collectAsState(initial = emptyList())
     var tab by remember { mutableStateOf(0) }
     var query by remember { mutableStateOf("") }
+    var sortMenu by remember { mutableStateOf(false) }
+    var sort by remember { mutableStateOf(TrackSort.TITLE) }
+    var ascending by remember { mutableStateOf(true) }
     val pager = rememberPagerState(pageCount = { TABS.size })
     val scope = rememberCoroutineScope()
 
-    val filtered = remember(tracks, query) {
-        if (query.isBlank()) tracks
-        else tracks.filter {
-            it.title.contains(query, true) || it.artist.contains(query, true) ||
-                it.album.contains(query, true)
+    // Filter+sort off the UI thread — track churn (e.g. playCount updates on every
+    // play) otherwise re-sorts the whole library on the composition thread.
+    val filtered by androidx.compose.runtime.produceState(initialValue = emptyList<TrackEntity>(), tracks, query, sort, ascending) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val base = if (query.isBlank()) tracks
+            else tracks.filter {
+                it.title.contains(query, true) || it.artist.contains(query, true) ||
+                    it.album.contains(query, true)
+            }
+            val cmp: Comparator<TrackEntity> = when (sort) {
+                TrackSort.TITLE -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.title }
+                TrackSort.ADDED -> compareBy { it.addedAt }
+                TrackSort.DURATION -> compareBy { it.durationMs }
+                TrackSort.PLAY_COUNT -> compareBy { it.playCount }
+            }
+            base.sortedWith(if (ascending) cmp else cmp.reversed())
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        PillTabRow(
-            tabs = TABS,
-            selectedIndex = tab,
-            onSelected = {
-                tab = it
-                scope.launch { pager.animateScrollToPage(it) }
-            },
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PillTabRow(
+                tabs = TABS,
+                selectedIndex = tab,
+                onSelected = {
+                    tab = it
+                    scope.launch { pager.animateScrollToPage(it) }
+                },
+                modifier = Modifier.weight(1f),
+            )
+            Box {
+                IconButton(onClick = { sortMenu = true }) {
+                    Icon(Icons.Default.Sort, contentDescription = "排序")
+                }
+                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                    listOf(
+                        TrackSort.TITLE to "标题", TrackSort.ADDED to "添加时间",
+                        TrackSort.DURATION to "时长", TrackSort.PLAY_COUNT to "播放次数",
+                    ).forEach { (s, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label + if (sort == s) (if (ascending) " ↑" else " ↓") else "") },
+                            onClick = {
+                                if (sort == s) ascending = !ascending else { sort = s; ascending = s == TrackSort.TITLE }
+                                sortMenu = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -102,7 +143,7 @@ fun DesktopLibrary(
                 }
                 1 -> AlbumList(albums) { album -> album.id?.let(onOpenAlbum) }
                 2 -> ArtistList(artists) { artist -> artist.id?.let(onOpenArtist) }
-                else -> FolderList(folders) { folder -> onOpenFolder(folder.path) }
+                else -> FolderList(db, folders, tracks) { folder -> onOpenFolder(folder.path) }
             }
         }
     }
@@ -234,32 +275,53 @@ private fun ArtistList(artists: List<ArtistEntity>, onOpen: (ArtistEntity) -> Un
 }
 
 @Composable
-private fun FolderList(folders: List<FolderSummary>, onOpen: (FolderSummary) -> Unit) {
+private fun FolderList(
+    db: RabBeatDatabase,
+    folders: List<FolderSummary>,
+    tracks: List<TrackEntity>,
+    onOpen: (FolderSummary) -> Unit,
+) {
     if (folders.isEmpty()) {
         EmptyState(message = "没有文件夹，导入音乐后按目录分组")
         return
     }
+    val scope = rememberCoroutineScope()
     LazyColumn(Modifier.fillMaxSize()) {
         items(folders, key = { it.path }) { folder ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpen(folder) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            androidx.compose.foundation.ContextMenuArea(
+                items = {
+                    listOf(
+                        androidx.compose.foundation.ContextMenuItem("隐藏此文件夹") {
+                            scope.launch {
+                                val ids = tracks
+                                    .filter { it.folderPath == folder.path.ifBlank { "本地" } }
+                                    .map { it.id }
+                                if (ids.isNotEmpty()) db.trackDao().setHidden(ids, true)
+                            }
+                        },
+                    )
+                },
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        folder.path.ifBlank { "本地" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "${folder.trackCount} 首",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpen(folder) }
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            folder.path.ifBlank { "本地" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${folder.trackCount} 首",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

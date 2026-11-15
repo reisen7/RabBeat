@@ -21,12 +21,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.compositionLocalOf
+import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.entity.TrackEntity
 import com.rabbeat.app.data.local.mapper.toDomain
 import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.EmptyState
 import kotlinx.coroutines.launch
+
+val LocalLikedPlaylist = compositionLocalOf<LikedPlaylist?> { null }
 
 /**
  * Wraps a composable with the desktop right-click context menu for a track:
@@ -45,12 +49,13 @@ fun TrackContextMenu(
     var pickPlaylist by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val domain = remember(track) { track.toDomain(null) }
+    val liked = LocalLikedPlaylist.current
 
     val items = buildList {
         add(ContextMenuItem("下一首播放") { player.playNext(domain) })
         add(ContextMenuItem("添加到队列") { player.enqueue(domain) })
         add(ContextMenuItem(if (track.isFavorite) "取消喜欢" else "喜欢") {
-            scope.launch { db.trackDao().toggleFavorite(track.id) }
+            scope.launch { if (liked != null) liked.toggle(track.id) else db.trackDao().toggleFavorite(track.id) }
         })
         if (inPlaylistId != null) {
             add(ContextMenuItem("从歌单移除") {
@@ -58,6 +63,15 @@ fun TrackContextMenu(
             })
         }
         add(ContextMenuItem("添加到歌单…") { pickPlaylist = true })
+        add(ContextMenuItem("匹配在线歌词") {
+            scope.launch {
+                val lrc = NeteaseClient.fetchLrc(track.title, track.artist) ?: return@launch
+                runCatching {
+                    val audio = java.io.File(java.net.URI(track.uri))
+                    java.io.File(audio.parentFile, audio.nameWithoutExtension + ".lrc").writeText(lrc)
+                }
+            }
+        })
         addAll(extraMenu)
         if (onHide != null) add(ContextMenuItem("隐藏") { onHide() })
     }

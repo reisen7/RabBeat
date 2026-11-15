@@ -37,14 +37,14 @@ compose.desktop {
         mainClass = "com.rabbeat.app.desktop.MainKt"
 
         nativeDistributions {
-            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Dmg,
-                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi,
-                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe,
-                org.jetbrains.compose.desktop.application.dsl.TargetFormat.Deb)
+            targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
             packageName = "RabBeat"
             packageVersion = "0.1.0"
             description = "RabBeat - local music player"
             vendor = "RabBeat"
+            // Cap heap: a runaway list would OOM inside the app instead of
+            // pressuring the whole machine.
+            jvmArgs("-Xmx1g", "-Dfile.encoding=UTF-8")
 
             windows {
                 menuGroup = "RabBeat"
@@ -53,4 +53,15 @@ compose.desktop {
             }
         }
     }
+}
+
+// Portable zip of the jpackage app image (no installer, no admin needed).
+tasks.register<Zip>("packagePortableZip") {
+    group = "compose desktop"
+    description = "Zip the composed app image as a portable package"
+    dependsOn("createDistributable")
+    val appDir = layout.buildDirectory.dir("compose/binaries/main/app/RabBeat")
+    from(appDir)
+    archiveFileName.set("RabBeat-0.1.0-portable.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main/portable"))
 }

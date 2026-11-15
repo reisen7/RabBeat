@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -40,7 +41,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,14 +62,23 @@ fun PlayerOverlay(
     player: PlaybackController,
     onCollapse: () -> Unit,
     onVolume: ((Float) -> Unit)? = null,
+    db: com.rabbeat.app.data.local.RabBeatDatabase? = null,
 ) {
     val track = state.currentTrack
     val accent = LocalAccentPalette.current
     var showQueue by remember { mutableStateOf(false) }
+    var showLyrics by remember { mutableStateOf(false) }
     var sleepMenu by remember { mutableStateOf(false) }
     var volume by remember { mutableStateOf(1f) }
-    val lyrics = remember(track?.id) { track?.let { LyricLoader.loadFor(it) } ?: emptyList() }
-    val lyricIndex = LyricLoader.currentIndex(lyrics, state.positionMs)
+    val scope = rememberCoroutineScope()
+    var lyricReload by remember { mutableStateOf(0) }
+    val lyrics = remember(track?.id, showLyrics, lyricReload) {
+        track?.let { LyricLoader.loadFor(it) } ?: emptyList()
+    }
+    val offsetMs = androidx.compose.runtime.produceState(0L, track?.id) {
+        if (db != null && track != null) value = db.trackDao().get(track.id)?.lyricOffsetMs ?: 0L
+    }.value
+    val lyricIndex = LyricLoader.currentIndex(lyrics, state.positionMs + offsetMs)
 
     Column(
         Modifier
@@ -98,7 +110,14 @@ fun PlayerOverlay(
                     }
                 }
             }
-            IconButton(onClick = { showQueue = !showQueue }) {
+            IconButton(onClick = { showLyrics = !showLyrics; if (showLyrics) showQueue = false; lyricReload++ }) {
+                Icon(
+                    Icons.Default.Lyrics,
+                    contentDescription = "歌词",
+                    tint = if (showLyrics) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { showQueue = !showQueue; if (showQueue) showLyrics = false }) {
                 Icon(
                     Icons.AutoMirrored.Filled.QueueMusic,
                     contentDescription = "队列",
@@ -109,6 +128,32 @@ fun PlayerOverlay(
 
         if (showQueue) {
             QueueList(state, player, Modifier.weight(1f))
+        } else if (showLyrics) {
+            LyricsPane(
+                lyrics = lyrics,
+                lyricIndex = lyricIndex,
+                offsetMs = offsetMs,
+                accent = accent,
+                hasTrack = track != null,
+                onOffset = { delta ->
+                    if (db != null && track != null) {
+                        val next = offsetMs + delta
+                        scope.launch { db.trackDao().updateLyricOffset(track.id, next) }
+                    }
+                },
+                onFetch = {
+                    if (track != null) scope.launch {
+                        NeteaseClient.fetchLrc(track.title, track.artist)?.let { lrc ->
+                            runCatching {
+                                val audio = java.io.File(java.net.URI(track.uri))
+                                java.io.File(audio.parentFile, audio.nameWithoutExtension + ".lrc").writeText(lrc)
+                                lyricReload++
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            )
         } else {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Artwork(
@@ -220,6 +265,69 @@ fun PlayerOverlay(
                     )
                     Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LyricsPane(
+    lyrics: List<LyricLoader.LrcLine>,
+    lyricIndex: Int,
+    offsetMs: Long,
+    accent: com.rabbeat.app.ui.theme.AccentPalette,
+    hasTrack: Boolean,
+    onOffset: (Long) -> Unit,
+    onFetch: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth()) {
+        if (lyrics.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        if (hasTrack) "暂无歌词" else "未在播放",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (hasTrack) {
+                        androidx.compose.material3.TextButton(onClick = onFetch) {
+                            Text("在线匹配歌词")
+                        }
+                    }
+                }
+            }
+        } else {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            androidx.compose.runtime.LaunchedEffect(lyricIndex) {
+                if (lyricIndex >= 0) listState.animateScrollToItem((lyricIndex - 3).coerceAtLeast(0))
+            }
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
+                itemsIndexed(lyrics) { i, line ->
+                    Text(
+                        line.text,
+                        style = if (i == lyricIndex) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                        color = if (i == lyricIndex) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (i == lyricIndex) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.TextButton(onClick = { onOffset(-500) }) { Text("-0.5s") }
+                Text(
+                    "偏移 ${"%.1f".format(offsetMs / 1000f)}s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                androidx.compose.material3.TextButton(onClick = { onOffset(500) }) { Text("+0.5s") }
             }
         }
     }
