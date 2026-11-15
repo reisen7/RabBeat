@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.sp
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.TrackQuerySql
 import com.rabbeat.app.desktop.library.LibraryScanner
+import com.rabbeat.app.desktop.ui.ImageCropDialog
 import com.rabbeat.app.desktop.ui.SeekBar
 import com.rabbeat.app.desktop.ui.hand
 import com.rabbeat.app.desktop.ui.translucentSurface
@@ -92,6 +93,7 @@ fun SettingsView(
     activeThemeMode: String = settings.themeMode,
     scanner: LibraryScanner,
     db: RabBeatDatabase,
+    bgAspect: Float = 16f / 9f,
     onThemeChange: () -> Unit,
     onAppearanceChange: () -> Unit,
     onOpenHidden: () -> Unit,
@@ -105,6 +107,7 @@ fun SettingsView(
     val storedBytes by db.trackDao().observeStoredBytes().collectAsState(initial = 0L)
     var updateDialog by remember { mutableStateOf<DesktopUpdate.Result?>(null) }
     var checking by remember { mutableStateOf(false) }
+    var cropSource by remember { mutableStateOf<File?>(null) }
 
     val palette = LocalRabBeatPalette.current
     val accent = LocalAccentPalette.current
@@ -304,8 +307,7 @@ fun SettingsView(
                             onClick = {
                                 scope.launch {
                                     pickFile("选择图片", "jpg", "jpeg", "png", "webp")?.let { file ->
-                                        settings.bgImage = file.absolutePath
-                                        onAppearanceChange()
+                                        cropSource = file
                                     }
                                 }
                             },
@@ -569,6 +571,32 @@ fun SettingsView(
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(scrollState),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+        )
+    }
+
+    cropSource?.let { src ->
+        ImageCropDialog(
+            source = src,
+            aspect = bgAspect,
+            maxSide = 2560,
+            outName = "bg_${System.currentTimeMillis()}.jpg",
+            title = "裁剪背景图片",
+            onConfirm = { out ->
+                cropSource = null
+                val prev = settings.bgImage
+                settings.bgImage = out.absolutePath
+                if (prev.isNotBlank()) {
+                    runCatching {
+                        val pf = File(prev)
+                        val artDir = File(LibraryScanner.dataDir(), "art").absoluteFile
+                        if (pf.absoluteFile.parentFile == artDir && pf.absoluteFile != out.absoluteFile) {
+                            pf.delete()
+                        }
+                    }
+                }
+                onAppearanceChange()
+            },
+            onDismiss = { cropSource = null },
         )
     }
 

@@ -63,7 +63,7 @@ fun TopBar(
     val palette = LocalRabBeatPalette.current
     val accent = LocalAccentPalette.current
     Row(
-        modifier.height(56.dp).background(translucentSurface()).padding(horizontal = 14.dp),
+        modifier.height(56.dp).background(translucentSurface()).padding(start = 14.dp, end = 150.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         NavCircleButton(Icons.AutoMirrored.Filled.ArrowBack, "后退", history.canBack) { history.back() }

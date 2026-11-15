@@ -128,6 +128,14 @@ fun NowPlayingPage(
             )
         }
 
+        DragRegion(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 64.dp, end = 150.dp)
+                .height(56.dp)
+                .align(Alignment.TopCenter),
+        )
+
         IconButton(
             onClick = onCollapse,
             modifier = Modifier.padding(14.dp).size(40.dp).hand(),

@@ -6,12 +6,16 @@ import com.rabbeat.app.desktop.net.*
 import com.rabbeat.app.desktop.sys.*
 import com.rabbeat.app.desktop.ui.*
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +29,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -48,6 +53,7 @@ import com.rabbeat.app.sharedui.generated.resources.ic_desktop_icon
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.ui.theme.RabBeatTheme
 import java.awt.Dimension
+import java.awt.GraphicsEnvironment
 import java.io.File
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
@@ -116,6 +122,22 @@ fun main() {
         height = (debugWindowSize()?.second ?: settings.windowH).dp,
     )
 
+    val persistWindowSize: () -> Unit = {
+        if (windowState.placement == WindowPlacement.Floating) {
+            settings.windowW = windowState.size.width.value.toInt()
+            settings.windowH = windowState.size.height.value.toInt()
+        }
+    }
+    val closeRequest: () -> Unit = {
+        persistWindowSize()
+        if (settings.closeToTray) {
+            windowVisible = false
+        } else {
+            player.shutdown()
+            exitApplication()
+        }
+    }
+
     Tray(
         icon = painterResource(Res.drawable.ic_desktop_icon),
         tooltip = "RabBeat",
@@ -127,8 +149,7 @@ fun main() {
             Item("上一首", onClick = { player.previous() })
             Separator()
             Item("退出", onClick = {
-                settings.windowW = windowState.size.width.value.toInt()
-                settings.windowH = windowState.size.height.value.toInt()
+                persistWindowSize()
                 player.shutdown()
                 exitApplication()
             })
@@ -136,16 +157,8 @@ fun main() {
     )
 
     if (windowVisible) Window(
-        onCloseRequest = {
-            settings.windowW = windowState.size.width.value.toInt()
-            settings.windowH = windowState.size.height.value.toInt()
-            if (settings.closeToTray) {
-                windowVisible = false  // close → minimize to tray
-            } else {
-                player.shutdown()
-                exitApplication()
-            }
-        },
+        onCloseRequest = closeRequest,
+        undecorated = true,
         title = "RabBeat",
         icon = painterResource(Res.drawable.ic_desktop_icon),
         state = windowState,
@@ -165,33 +178,65 @@ fun main() {
         window.minimumSize = Dimension(1000, 640)
         LaunchedEffect(activateTick) {
             if (activateTick > 0) {
-                window.extendedState = java.awt.Frame.NORMAL
+                window.extendedState = window.extendedState and java.awt.Frame.ICONIFIED.inv()
                 window.toFront()
                 window.requestFocus()
             }
         }
         val themeMode = debugTheme() ?: remember(themeTick) { ThemeMode.valueOf(settings.themeMode) }
         val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
-        RabBeatTheme(themeMode = themeMode, accentTheme = accent, darkPalette = DesktopDarkPalette) {
-            val activePalette = LocalRabBeatPalette.current
-            val isDark = activePalette.isDark
-            LaunchedEffect(window, isDark, activePalette.background) {
-                WindowsTitleBar.apply(window, isDark, activePalette.background)
+        fun toggleMaximize() {
+            windowState.placement = if (windowState.placement == WindowPlacement.Maximized) {
+                WindowPlacement.Floating
+            } else {
+                runCatching {
+                    window.maximizedBounds =
+                        GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
+                }
+                WindowPlacement.Maximized
             }
-            Surface(Modifier.fillMaxSize()) {
-                key(appearanceTick) {
-                    AppShell(
-                        db = db,
-                        player = player,
-                        scope = appScope,
-                        settings = settings,
-                        activeThemeMode = themeMode.name,
-                        playerOpen = playerOpen,
-                        queueOpen = queueOpen,
-                        keys = keys,
-                        onThemeChanged = { themeTick++ },
-                        onAppearanceChanged = { appearanceTick++ },
-                    )
+        }
+        RabBeatTheme(themeMode = themeMode, accentTheme = accent, darkPalette = DesktopDarkPalette) {
+            val palette = LocalRabBeatPalette.current
+            CompositionLocalProvider(
+                LocalWindowScope provides this,
+                LocalToggleMaximize provides ::toggleMaximize,
+            ) {
+                Surface(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize().border(1.dp, palette.separator)) {
+                        DragRegion(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .align(Alignment.TopCenter),
+                        )
+                        AppShell(
+                            db = db,
+                            player = player,
+                            scope = appScope,
+                            settings = settings,
+                            activeThemeMode = themeMode.name,
+                            playerOpen = playerOpen,
+                            queueOpen = queueOpen,
+                            keys = keys,
+                            appearanceTick = appearanceTick,
+                            bgAspect = windowState.size.width.value
+                                .let { w -> windowState.size.height.value.let { h -> if (w > 0 && h > 0) w / h else 16f / 9f } },
+                            onThemeChanged = { themeTick++ },
+                            onAppearanceChanged = { appearanceTick++ },
+                        )
+                        WindowControls(
+                            placement = windowState.placement,
+                            onMinimize = { windowState.isMinimized = true },
+                            onToggleMaximize = ::toggleMaximize,
+                            onClose = closeRequest,
+                            modifier = Modifier.align(Alignment.TopEnd),
+                        )
+                        WindowResizeHandles(
+                            window = window,
+                            enabled = windowState.placement == WindowPlacement.Floating,
+                        )
+                    }
                 }
             }
         }

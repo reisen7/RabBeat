@@ -77,6 +77,7 @@ import com.rabbeat.app.desktop.library.DetailHeroHeader
 import com.rabbeat.app.desktop.library.LibraryScanner
 import com.rabbeat.app.desktop.library.buildMetaLine
 import com.rabbeat.app.desktop.net.NeteaseImporter
+import com.rabbeat.app.desktop.ui.ImageCropDialog
 import com.rabbeat.app.desktop.ui.TrackTable
 import com.rabbeat.app.desktop.ui.hand
 import com.rabbeat.app.domain.model.Track
@@ -89,7 +90,6 @@ import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import java.io.File
 import java.util.UUID
-import javax.imageio.ImageIO
 import com.rabbeat.app.desktop.sys.pickFile
 import kotlinx.coroutines.launch
 
@@ -427,6 +427,7 @@ fun PlaylistDetailView(
     val byId = remember(all) { all.associateBy { it.id } }
     val tracks = remember(refs, byId) { refs.mapNotNull { byId[it.trackId] } }
     var renaming by remember { mutableStateOf(false) }
+    var coverCropSource by remember { mutableStateOf<File?>(null) }
     val accent = LocalAccentPalette.current
 
     TrackTable(
@@ -492,11 +493,7 @@ fun PlaylistDetailView(
                     HeroCircleAction(Icons.Default.Image, "设置封面") {
                         scope.launch {
                             pickFile("选择图片", "jpg", "jpeg", "png", "webp")?.let { file ->
-                                val dest = cropSquareToArt(file, playlistId)
-                                if (dest != null) {
-                                    db.playlistDao().setCover(playlistId, dest.toURI().toString())
-                                    playlistTick++
-                                }
+                                coverCropSource = file
                             }
                         }
                     }
@@ -514,6 +511,35 @@ fun PlaylistDetailView(
             )
         },
     )
+
+    coverCropSource?.let { src ->
+        ImageCropDialog(
+            source = src,
+            aspect = 1f,
+            maxSide = 512,
+            outName = "pl_${playlistId}_${System.currentTimeMillis()}.jpg",
+            title = "裁剪歌单封面",
+            onConfirm = { out ->
+                coverCropSource = null
+                val prev = playlist?.coverUri
+                scope.launch {
+                    db.playlistDao().setCover(playlistId, out.toURI().toString())
+                    prev?.let {
+                        runCatching {
+                            val f = File(java.net.URI(it))
+                            if (f.absoluteFile.parentFile ==
+                                File(LibraryScanner.dataDir(), "art").absoluteFile
+                            ) {
+                                f.delete()
+                            }
+                        }
+                    }
+                    playlistTick++
+                }
+            },
+            onDismiss = { coverCropSource = null },
+        )
+    }
 
     if (renaming) {
         var name by remember { mutableStateOf(playlist?.name.orEmpty()) }
@@ -572,22 +598,6 @@ private fun HeroCircleAction(icon: ImageVector, desc: String, onClick: () -> Uni
     }
 }
 
-
-/** Center-crop to a 512px square and persist under ~/.rabbeat/art as the playlist cover. */
-private fun cropSquareToArt(src: File, playlistId: String): File? = runCatching {
-    val img = ImageIO.read(src) ?: return null
-    val side = minOf(img.width, img.height)
-    val cropped = img.getSubimage((img.width - side) / 2, (img.height - side) / 2, side, side)
-    val scaled = java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_RGB)
-    scaled.createGraphics().apply {
-        setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-        drawImage(cropped, 0, 0, 512, 512, null)
-        dispose()
-    }
-    val out = File(LibraryScanner.dataDir(), "art/pl_$playlistId.jpg").apply { parentFile?.mkdirs() }
-    ImageIO.write(scaled, "jpg", out)
-    out
-}.getOrNull()
 
 suspend fun addToPlaylist(db: RabBeatDatabase, playlistId: String, tracks: List<Track>) {
     val existing = db.playlistDao().trackCount(playlistId)

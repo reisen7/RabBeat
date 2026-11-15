@@ -80,6 +80,8 @@ fun AppShell(
     playerOpen: MutableState<Boolean>,
     queueOpen: MutableState<Boolean>,
     keys: ShellKeys,
+    appearanceTick: Int = 0,
+    bgAspect: Float = 16f / 9f,
     onThemeChanged: () -> Unit,
     onAppearanceChanged: () -> Unit,
 ) {
@@ -137,7 +139,7 @@ fun AppShell(
         }
     }
 
-    val bgPath = settings.bgImage
+    val bgPath = remember(appearanceTick) { settings.bgImage }
     val bgBitmap = remember(bgPath) {
         bgPath.takeIf { it.isNotBlank() }
             ?.let { runCatching { androidx.compose.ui.res.loadImageBitmap(File(it).inputStream()) }.getOrNull() }
@@ -334,6 +336,7 @@ fun AppShell(
                                     activeThemeMode = activeThemeMode,
                                     scanner = scanner,
                                     db = db,
+                                    bgAspect = bgAspect,
                                     onThemeChange = onThemeChanged,
                                     onAppearanceChange = onAppearanceChanged,
                                     onOpenHidden = { history.push(DesktopRoute.HiddenSongs) },
