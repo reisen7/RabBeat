@@ -1,7 +1,9 @@
 package com.rabbeat.app.data.local
 
+import androidx.room.ConstructedBy
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.RoomDatabaseConstructor
 import androidx.room.TypeConverters
 import com.rabbeat.app.data.local.converter.EnumConverters
 import com.rabbeat.app.data.local.dao.AlbumDao
@@ -38,6 +40,7 @@ import com.rabbeat.app.data.local.entity.TrackEntity
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)
+@ConstructedBy(RabBeatDatabaseConstructor::class)
 abstract class RabBeatDatabase : RoomDatabase() {
     abstract fun trackDao(): TrackDao
     abstract fun albumDao(): AlbumDao
@@ -47,4 +50,10 @@ abstract class RabBeatDatabase : RoomDatabase() {
     abstract fun playbackStateDao(): PlaybackStateDao
     abstract fun playHistoryDao(): PlayHistoryDao
     abstract fun lyricLinkDao(): LyricLinkDao
+}
+
+// The Room compiler generates the actual implementations per target.
+@Suppress("KotlinNoActualForExpect", "EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
+expect object RabBeatDatabaseConstructor : RoomDatabaseConstructor<RabBeatDatabase> {
+    override fun initialize(): RabBeatDatabase
 }

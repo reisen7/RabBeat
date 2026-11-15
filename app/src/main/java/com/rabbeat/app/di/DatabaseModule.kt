@@ -2,6 +2,7 @@ package com.rabbeat.app.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.rabbeat.app.data.local.MIGRATION_1_2
 import com.rabbeat.app.data.local.MIGRATION_2_3
 import com.rabbeat.app.data.local.MIGRATION_3_4
@@ -31,7 +32,8 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): RabBeatDatabase =
-        Room.databaseBuilder(context, RabBeatDatabase::class.java, "rabbeat.db")
+        Room.databaseBuilder<RabBeatDatabase>(context, "rabbeat.db")
+            .setDriver(BundledSQLiteDriver())
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigration(true)
             .build()

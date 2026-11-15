@@ -4,8 +4,8 @@ import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.RawQuery
+import androidx.room.RoomRawQuery
 import androidx.room.Upsert
-import androidx.sqlite.db.SupportSQLiteQuery
 import com.rabbeat.app.data.local.entity.TrackEntity
 import com.rabbeat.app.domain.model.DownloadState
 import com.rabbeat.app.domain.model.FolderSummary
@@ -53,19 +53,19 @@ interface TrackDao {
     suspend fun getBySource(sourceId: String): List<TrackEntity>
 
     @RawQuery(observedEntities = [TrackEntity::class])
-    fun pagingSource(query: SupportSQLiteQuery): PagingSource<Int, TrackEntity>
+    fun pagingSource(query: RoomRawQuery): PagingSource<Int, TrackEntity>
 
     @RawQuery
-    suspend fun query(query: SupportSQLiteQuery): List<TrackEntity>
+    suspend fun query(query: RoomRawQuery): List<TrackEntity>
 
     @RawQuery(observedEntities = [TrackEntity::class])
-    fun observeQuery(query: SupportSQLiteQuery): Flow<List<TrackEntity>>
+    fun observeQuery(query: RoomRawQuery): Flow<List<TrackEntity>>
 
     @RawQuery(observedEntities = [TrackEntity::class])
-    fun observeCount(query: SupportSQLiteQuery): Flow<Int>
+    fun observeCount(query: RoomRawQuery): Flow<Int>
 
     @RawQuery
-    suspend fun ids(query: SupportSQLiteQuery): List<String>
+    suspend fun ids(query: RoomRawQuery): List<String>
 
     @Query(
         "SELECT COALESCE(NULLIF(TRIM(folder), ''), '本地') AS path, COUNT(*) AS trackCount " +
