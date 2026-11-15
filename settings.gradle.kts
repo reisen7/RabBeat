@@ -18,3 +18,4 @@ rootProject.name = "RabBeat"
 include(":app")
 include(":core")
 include(":desktopApp")
+include(":sharedUi")

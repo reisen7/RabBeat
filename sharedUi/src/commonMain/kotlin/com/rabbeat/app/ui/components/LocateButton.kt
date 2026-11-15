@@ -13,9 +13,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.res.stringResource
+
 import androidx.compose.ui.unit.dp
-import com.rabbeat.app.R
+import com.rabbeat.app.sharedui.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.resources.painterResource
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 
@@ -32,7 +34,7 @@ fun LocateButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     ) {
         Icon(
             Icons.Filled.MyLocation,
-            contentDescription = stringResource(R.string.playlist_locate),
+            contentDescription = stringResource(Res.string.playlist_locate),
             tint = LocalAccentPalette.current.color,
             modifier = Modifier.size(20.dp),
         )

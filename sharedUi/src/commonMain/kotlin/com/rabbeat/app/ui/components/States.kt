@@ -24,11 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
+
+
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.rabbeat.app.R
+import com.rabbeat.app.sharedui.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.resources.painterResource
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 
@@ -42,7 +44,7 @@ sealed interface ScreenState<out T> {
 @Composable
 fun BrandMark(modifier: Modifier = Modifier) {
     Box(modifier.size(84.dp).clip(RoundedCornerShape(22))) {
-        listOf(R.drawable.ic_launcher_background, R.drawable.ic_launcher_foreground).forEach { layer ->
+        listOf(Res.drawable.ic_launcher_background, Res.drawable.ic_launcher_foreground).forEach { layer ->
             Image(
                 painterResource(layer),
                 contentDescription = null,
@@ -113,14 +115,14 @@ fun FailedState(modifier: Modifier = Modifier, onRetry: () -> Unit) {
         )
         Spacer(Modifier.height(14.dp))
         Text(
-            stringResource(R.string.error_generic),
+            stringResource(Res.string.error_generic),
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center,
             color = palette.label,
         )
         TextButton(onClick = onRetry) {
             Text(
-                stringResource(R.string.error_retry),
+                stringResource(Res.string.error_retry),
                 color = LocalAccentPalette.current.color,
                 style = MaterialTheme.typography.bodyLarge,
             )

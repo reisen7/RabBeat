@@ -47,10 +47,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.stringResource
+
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.rabbeat.app.R
+import com.rabbeat.app.sharedui.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.resources.painterResource
 import com.rabbeat.app.playback.PlaybackUiState
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
@@ -142,13 +144,13 @@ fun MiniPlayerBar(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    track?.title ?: stringResource(R.string.mini_nothing),
+                    track?.title ?: stringResource(Res.string.mini_nothing),
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    track?.artist ?: stringResource(R.string.slogan),
+                    track?.artist ?: stringResource(Res.string.slogan),
                     style = MaterialTheme.typography.bodySmall,
                     color = palette.secondaryLabel,
                     maxLines = 1,
@@ -158,7 +160,7 @@ fun MiniPlayerBar(
             IconButton(onClick = onToggle, enabled = track != null) {
                 Icon(
                     if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = stringResource(if (state.isPlaying) R.string.cd_pause else R.string.cd_play),
+                    contentDescription = stringResource(if (state.isPlaying) Res.string.cd_pause else Res.string.cd_play),
                     tint = palette.label,
                     modifier = Modifier.size(28.dp),
                 )
@@ -166,7 +168,7 @@ fun MiniPlayerBar(
             IconButton(onClick = onNext, enabled = track != null) {
                 Icon(
                     Icons.Filled.SkipNext,
-                    contentDescription = stringResource(R.string.cd_next),
+                    contentDescription = stringResource(Res.string.cd_next),
                     tint = palette.label,
                     modifier = Modifier.size(24.dp),
                 )

@@ -92,6 +92,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":sharedUi"))
     implementation("androidx.sqlite:sqlite-bundled:2.5.2")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)

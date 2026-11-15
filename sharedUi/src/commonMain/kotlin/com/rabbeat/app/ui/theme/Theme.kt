@@ -1,8 +1,5 @@
 package com.rabbeat.app.ui.theme
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -12,14 +9,12 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
 import com.rabbeat.app.domain.model.AccentTheme
 import com.rabbeat.app.domain.model.ThemeMode
+import com.rabbeat.app.ui.SystemBarsEffect
 
 val LocalRabBeatPalette = staticCompositionLocalOf { DarkRabBeatPalette }
 val LocalAccentPalette = staticCompositionLocalOf { AccentTheme.ROSE.palette() }
@@ -102,16 +97,7 @@ fun RabBeatTheme(
     val accent = accentTheme.palette(dark)
     val palette = if (dark) DarkRabBeatPalette else LightRabBeatPalette
     val colors = if (dark) darkScheme(accent, palette) else lightScheme(accent, palette)
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = view.context.findActivity()?.window ?: return@SideEffect
-            WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !dark
-                isAppearanceLightNavigationBars = !dark
-            }
-        }
-    }
+    SystemBarsEffect(dark)
     CompositionLocalProvider(
         LocalRabBeatPalette provides palette,
         LocalAccentPalette provides accent,
@@ -126,10 +112,4 @@ fun RabBeatTheme(
             }
         }
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }

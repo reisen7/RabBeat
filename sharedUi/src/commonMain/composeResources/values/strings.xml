@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="slogan">你的音乐，你的RabBeat</string>
+    <string name="cd_play">播放</string>
+    <string name="cd_pause">暂停</string>
+    <string name="cd_next">下一首</string>
+    <string name="error_generic">出了点问题，再试一次</string>
+    <string name="error_retry">重试</string>
+    <string name="mini_nothing">还没有在播放</string>
+    <string name="playlist_locate">定位到正在播放</string>
+</resources>

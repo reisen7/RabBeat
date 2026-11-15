@@ -15,14 +15,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.rabbeat.app.ui.resourceArtworkPainter
 import kotlin.math.abs
 
 private val coverColors = listOf(
@@ -44,10 +44,11 @@ fun Artwork(
     cornerRadius: Dp = 12.dp,
 ) {
     val shape = RoundedCornerShape(cornerRadius)
-    val context = LocalContext.current
-    val resId = remember(artworkUri) {
-        if (artworkUri.isNullOrBlank()) 0
-        else context.resources.getIdentifier(artworkUri.substringAfterLast('/'), "drawable", context.packageName)
+    val context = LocalPlatformContext.current
+    val resourcePainter = if (artworkUri?.startsWith("android.resource://") == true) {
+        resourceArtworkPainter(artworkUri)
+    } else {
+        null
     }
     val pair = coverColors[abs(title.hashCode()) % coverColors.size]
     Box(
@@ -57,8 +58,8 @@ fun Artwork(
         contentAlignment = Alignment.Center,
     ) {
         when {
-            resId != 0 -> Image(
-                painter = painterResource(resId),
+            resourcePainter != null -> Image(
+                painter = resourcePainter,
                 contentDescription = title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
