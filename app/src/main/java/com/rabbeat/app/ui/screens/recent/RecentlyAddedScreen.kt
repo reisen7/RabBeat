@@ -29,7 +29,7 @@ import com.rabbeat.app.domain.model.TrackSort
 import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.playback.PlaybackUiState
 import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.EmptyState
@@ -50,7 +50,7 @@ private val RECENT_QUERY = TrackQuery(sort = TrackSort.ADDED)
 @HiltViewModel
 class RecentlyAddedViewModel @Inject constructor(
     private val music: MusicRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
 ) : ViewModel() {

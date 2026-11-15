@@ -38,21 +38,6 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-data class PlaybackUiState(
-    val currentTrack: Track? = null,
-    val isPlaying: Boolean = false,
-    val positionMs: Long = 0,
-    val durationMs: Long = 0,
-    val queue: List<Track> = emptyList(),
-    val currentIndex: Int = -1,
-    val repeatMode: RepeatMode = RepeatMode.OFF,
-    val shuffle: Boolean = false,
-    val sleepTimerRemainingMs: Long? = null,
-    val speed: Float = 1f,
-    val error: String? = null,
-    val restoring: Boolean = true,
-)
-
 @Singleton
 class PlayerController @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -64,10 +49,10 @@ class PlayerController @Inject constructor(
     private val cacheStatus: NeteaseCacheStatus,
     private val logger: AppLogger,
     @ApplicationScope private val scope: CoroutineScope,
-) {
+) : PlaybackController {
     private val json = Json { ignoreUnknownKeys = true }
     private val _state = MutableStateFlow(PlaybackUiState())
-    val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
+    override val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
     private var queue: List<Track> = emptyList()
     private var index: Int = -1
@@ -87,7 +72,7 @@ class PlayerController @Inject constructor(
 
     private var initJob: Job? = null
 
-    fun warmUp() {
+    override fun warmUp() {
         if (initJob != null) return
         initJob = scope.launch {
             val start = SystemClock.elapsedRealtime()
@@ -136,7 +121,7 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun playQueue(tracks: List<Track>, startIndex: Int) {
+    override fun playQueue(tracks: List<Track>, startIndex: Int) {
         if (tracks.isEmpty()) return
         warmUp()
         queue = tracks
@@ -147,7 +132,7 @@ class PlayerController @Inject constructor(
         applyToPlayer(play = true)
     }
 
-    fun toggle() {
+    override fun toggle() {
         val exo = player
         if (exo == null && initJob?.isActive == true) {
             scope.launch { initJob?.join(); toggle() }
@@ -167,29 +152,29 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun next() {
+    override fun next() {
         val exo = player ?: return bump(1, play = false)
         if (exo.mediaItemCount == 0) return bump(1, play = false)
         if (exo.hasNextMediaItem()) exo.seekToNext() else exo.seekTo(0, 0L)
     }
 
-    fun previous() {
+    override fun previous() {
         if ((player?.mediaItemCount ?: 0) > 0) player?.seekToPrevious() else bump(-1, play = false)
     }
 
-    fun seekTo(positionMs: Long) {
+    override fun seekTo(positionMs: Long) {
         pendingSeek = positionMs.coerceAtLeast(0L)
         player?.seekTo(pendingSeek)
         publish(player?.isPlaying == true, pendingSeek)
     }
 
-    fun toggleShuffle() {
+    override fun toggleShuffle() {
         shuffle = !shuffle
         player?.shuffleModeEnabled = shuffle
         publish(player?.isPlaying == true, player?.currentPosition ?: pendingSeek)
     }
 
-    fun cycleRepeat() {
+    override fun cycleRepeat() {
         repeatMode = when (repeatMode) {
             RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE
@@ -203,13 +188,13 @@ class PlayerController @Inject constructor(
         publish(player?.isPlaying == true, player?.currentPosition ?: pendingSeek)
     }
 
-    fun setSpeed(value: Float) {
+    override fun setSpeed(value: Float) {
         speed = value
         player?.playbackParameters = PlaybackParameters(value)
         publish(player?.isPlaying == true, player?.currentPosition ?: pendingSeek)
     }
 
-    fun setSleepTimer(durationMs: Long, fade: Boolean) {
+    override fun setSleepTimer(durationMs: Long, fade: Boolean) {
         sleepJob?.cancel()
         if (durationMs <= 0L) {
             sleepRemaining = null
@@ -239,9 +224,9 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun playNext(track: Track) = playNext(listOf(track))
+    override fun playNext(track: Track) = playNext(listOf(track))
 
-    fun playNext(tracks: List<Track>) {
+    override fun playNext(tracks: List<Track>) {
         if (tracks.isEmpty()) return
         warmUp()
         val exo = player
@@ -265,7 +250,7 @@ class PlayerController @Inject constructor(
         publish(exo.isPlaying, exo.currentPosition)
     }
 
-    fun enqueue(track: Track) {
+    override fun enqueue(track: Track) {
         warmUp()
         val exo = player
         if (exo == null) {
@@ -283,7 +268,7 @@ class PlayerController @Inject constructor(
         publish(exo.isPlaying, exo.currentPosition)
     }
 
-    fun moveQueueItem(from: Int, to: Int) {
+    override fun moveQueueItem(from: Int, to: Int) {
         queue = QueueManager.move(queue, from, to)
         index = QueueManager.shiftedIndex(index, from, to)
         player?.moveMediaItem(from, to)
@@ -291,7 +276,7 @@ class PlayerController @Inject constructor(
         scope.launch { persist() }
     }
 
-    fun removeFromQueue(itemIndex: Int) {
+    override fun removeFromQueue(itemIndex: Int) {
         if (itemIndex !in queue.indices) return
         val removingCurrent = itemIndex == index
         queue = QueueManager.remove(queue, itemIndex)
@@ -306,7 +291,7 @@ class PlayerController @Inject constructor(
         scope.launch { persist() }
     }
 
-    fun clearUpcoming() {
+    override fun clearUpcoming() {
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)
         index = if (current == null) -1 else 0

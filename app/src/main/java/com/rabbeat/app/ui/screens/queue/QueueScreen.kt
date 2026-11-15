@@ -55,7 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.rabbeat.app.R
 import com.rabbeat.app.domain.repository.PlaylistRepository
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.GlassPill
 import com.rabbeat.app.ui.components.HeaderIconButton
@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class QueueViewModel @Inject constructor(
-    val player: PlayerController,
+    val player: PlaybackController,
     private val playlists: PlaylistRepository,
 ) : ViewModel() {
     val playback = player.state

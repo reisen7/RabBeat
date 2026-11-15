@@ -98,7 +98,7 @@ import com.rabbeat.app.domain.model.RepeatMode
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.SettingsRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.LoadingState
@@ -116,7 +116,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
-    val player: PlayerController,
+    val player: PlaybackController,
     settings: SettingsRepository,
     private val favorites: ToggleFavoriteUseCase,
     val colors: ArtworkColorCache,

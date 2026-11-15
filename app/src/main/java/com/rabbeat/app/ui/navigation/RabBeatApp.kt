@@ -42,7 +42,7 @@ import com.rabbeat.app.domain.model.AccentTheme
 import com.rabbeat.app.domain.model.AppearanceSettings
 import com.rabbeat.app.domain.model.ThemeMode
 import com.rabbeat.app.domain.repository.SettingsRepository
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AppDrawer
 import com.rabbeat.app.ui.components.BottomTab
 import com.rabbeat.app.ui.components.DrawerSection
@@ -101,7 +101,7 @@ sealed interface Route {
 @HiltViewModel
 class AppShellViewModel @Inject constructor(
     settings: SettingsRepository,
-    val player: PlayerController,
+    val player: PlaybackController,
 ) : ViewModel() {
     // null = still loading; the splash stays up until the first real emission
     // so the screen never flashes default theme/black before user settings arrive.

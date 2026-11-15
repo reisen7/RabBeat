@@ -81,7 +81,7 @@ import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.model.UserPlaylist
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.PlaylistRepository
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AccentButton
 import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.EmptyState
@@ -115,7 +115,7 @@ data class PlaylistPage(val playlist: UserPlaylist?, val tracks: List<Track>, va
 @HiltViewModel
 class PlaylistDetailViewModel @Inject constructor(
     private val playlists: PlaylistRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
     private val folders: FolderLibraryImporter,
     private val music: MusicRepository,
     private val coverStore: PlaylistCoverStore,

@@ -57,7 +57,7 @@ import com.rabbeat.app.domain.usecase.HomeContent
 import com.rabbeat.app.domain.usecase.ObserveHomeUseCase
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
 import com.rabbeat.app.playback.PlaybackUiState
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AccentButton
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.EmptyState
@@ -98,7 +98,7 @@ data class NowPlaying(val track: Track?, val playing: Boolean)
 class HomeViewModel @Inject constructor(
     observeHome: ObserveHomeUseCase,
     network: NetworkStatus,
-    val player: PlayerController,
+    val player: PlaybackController,
     val colors: ArtworkColorCache,
     @ApplicationContext private val appContext: Context,
     private val favorites: ToggleFavoriteUseCase,

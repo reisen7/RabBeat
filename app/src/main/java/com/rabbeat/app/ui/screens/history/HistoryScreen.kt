@@ -43,7 +43,7 @@ import com.rabbeat.app.R
 import com.rabbeat.app.domain.model.PlayRecord
 import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.domain.repository.MusicRepository
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.FailedState
 import com.rabbeat.app.ui.components.GlassPill
@@ -74,7 +74,7 @@ data class HistoryPage(
 @HiltViewModel
 class HistoryViewModel @Inject constructor(
     private val music: MusicRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
 ) : ViewModel() {
     val page = combine(music.observePlayHistory(), music.observeTracks()) { recent, tracks ->
         val ranked = tracks.filter { it.playCount > 0 }.sortedByDescending { it.playCount }

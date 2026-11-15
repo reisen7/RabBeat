@@ -55,7 +55,7 @@ import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.PlaylistRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.CreatePlaylistDialog
 import com.rabbeat.app.ui.components.EmptyState
@@ -103,7 +103,7 @@ data class ProfilePage(
 class ProfileViewModel @Inject constructor(
     private val music: MusicRepository,
     private val playlists: PlaylistRepository,
-    val player: PlayerController,
+    val player: PlaybackController,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
 ) : ViewModel() {

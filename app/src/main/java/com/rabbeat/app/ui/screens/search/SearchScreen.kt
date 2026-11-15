@@ -53,7 +53,7 @@ import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.SettingsRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.EmptyState
@@ -86,7 +86,7 @@ import kotlinx.coroutines.launch
 class SearchViewModel @Inject constructor(
     private val music: MusicRepository,
     private val settings: SettingsRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
 ) : ViewModel() {

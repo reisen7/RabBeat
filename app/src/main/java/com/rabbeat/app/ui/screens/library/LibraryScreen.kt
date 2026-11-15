@@ -83,7 +83,7 @@ import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.SourceRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.EmptyState
@@ -146,7 +146,7 @@ class LibraryViewModel @Inject constructor(
     private val music: MusicRepository,
     sources: SourceRepository,
     network: NetworkStatus,
-    private val player: PlayerController,
+    private val player: PlaybackController,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
     private val scanner: LocalMediaScanner,

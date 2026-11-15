@@ -53,7 +53,7 @@ import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.MusicRepository
 import com.rabbeat.app.domain.repository.SourceRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
-import com.rabbeat.app.playback.PlayerController
+import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.AccentButton
 import com.rabbeat.app.ui.components.AddToPlaylistDialog
 import com.rabbeat.app.ui.components.Artwork
@@ -82,7 +82,7 @@ data class AlbumPage(val album: Album, val tracks: List<Track>)
 @HiltViewModel
 class AlbumDetailViewModel @Inject constructor(
     private val music: MusicRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
 ) : ViewModel() {
@@ -181,7 +181,7 @@ fun AlbumDetailScreen(albumId: String, onBack: () -> Unit, vm: AlbumDetailViewMo
 @HiltViewModel
 class ArtistDetailViewModel @Inject constructor(
     private val music: MusicRepository,
-    private val player: PlayerController,
+    private val player: PlaybackController,
 ) : ViewModel() {
     fun page(artistId: String) = combine(
         music.observeArtist(artistId),
