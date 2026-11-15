@@ -90,9 +90,7 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import java.io.File
 import java.util.UUID
 import javax.imageio.ImageIO
-import javax.swing.JFileChooser
-import javax.swing.SwingUtilities
-import javax.swing.filechooser.FileNameExtensionFilter
+import com.rabbeat.app.desktop.sys.pickFile
 import kotlinx.coroutines.launch
 
 @Composable
@@ -492,8 +490,8 @@ fun PlaylistDetailView(
                 },
                 extraActions = {
                     HeroCircleAction(Icons.Default.Image, "设置封面") {
-                        pickImage { file ->
-                            scope.launch {
+                        scope.launch {
+                            pickFile("选择图片", "jpg", "jpeg", "png", "webp")?.let { file ->
                                 val dest = cropSquareToArt(file, playlistId)
                                 if (dest != null) {
                                     db.playlistDao().setCover(playlistId, dest.toURI().toString())
@@ -574,16 +572,6 @@ private fun HeroCircleAction(icon: ImageVector, desc: String, onClick: () -> Uni
     }
 }
 
-private fun pickImage(onPicked: (File) -> Unit) {
-    SwingUtilities.invokeLater {
-        val chooser = JFileChooser(javax.swing.filechooser.FileSystemView.getFileSystemView().homeDirectory).apply {
-            fileFilter = FileNameExtensionFilter("图片", "jpg", "jpeg", "png", "webp")
-        }
-        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-            onPicked(chooser.selectedFile)
-        }
-    }
-}
 
 /** Center-crop to a 512px square and persist under ~/.rabbeat/art as the playlist cover. */
 private fun cropSquareToArt(src: File, playlistId: String): File? = runCatching {

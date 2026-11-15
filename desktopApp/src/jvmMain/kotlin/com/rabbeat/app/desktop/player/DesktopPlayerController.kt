@@ -67,9 +67,19 @@ class DesktopPlayerController(
     private var sleepJob: Job? = null
     private var lastPersistAt = 0L
 
-    private val decodeDir = File(LibraryScanner.dataDir(), "decoded")
-    private val ncm = NcmDecoderCore(decodeDir)
-    private val qmc = QmcDecoderCore(decodeDir)
+    private var decoderRoot: File? = null
+    private var ncm: NcmDecoderCore? = null
+    private var qmc: QmcDecoderCore? = null
+
+    private fun decoders(): Pair<NcmDecoderCore, QmcDecoderCore> {
+        val root = File(settings.cacheRoot(), "decoded")
+        if (root != decoderRoot) {
+            decoderRoot = root
+            ncm = NcmDecoderCore(root)
+            qmc = QmcDecoderCore(root)
+        }
+        return ncm!! to qmc!!
+    }
 
     private val lineLock = Any()
     @Volatile private var line: SourceDataLine? = null
@@ -89,6 +99,12 @@ class DesktopPlayerController(
     init {
         scope.launch { restore() }
         scope.launch { watchProgress() }
+        scope.launch(Dispatchers.IO) {
+            val legacy = File(LibraryScanner.dataDir(), "decoded")
+            if (legacy != File(settings.cacheRoot(), "decoded")) {
+                runCatching { legacy.deleteRecursively() }
+            }
+        }
     }
 
     override fun warmUp() {
@@ -383,7 +399,7 @@ class DesktopPlayerController(
     /** Remote tracks are fetched into ~/.rabbeat/cache on first play, then read locally. */
     private fun resolveSource(track: Track): File {
         if (!track.uri.startsWith("http")) return resolveFile(track)
-        val dir = File(LibraryScanner.dataDir(), "cache").apply { mkdirs() }
+        val dir = settings.cacheRoot().apply { mkdirs() }
         val cached = File(dir, "${track.id}.audio")
         if (cached.isFile && cached.length() > 0) return cached
         val tmp = File(dir, "${track.id}.part")
@@ -399,6 +415,7 @@ class DesktopPlayerController(
 
     private fun resolveFile(track: Track): File {
         val f = File(URI(track.uri))
+        val (ncm, qmc) = decoders()
         return when (f.extension.lowercase()) {
             "ncm" -> f.inputStream().buffered().use { ncm.decode(it, track.id)?.file } ?: f
             "mgg", "qmc", "mflac", "tkm", "ofl_en", "ofc" ->

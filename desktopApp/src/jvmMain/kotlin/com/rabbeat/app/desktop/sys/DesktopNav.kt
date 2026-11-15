@@ -56,6 +56,12 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var closeToTray: Boolean = load("closeToTray", "true").toBoolean()
         set(value) { field = value; save("closeToTray", value.toString()) }
 
+    var cacheDir: String = load("cacheDir", "")
+        set(value) { field = value; save("cacheDir", value) }
+
+    fun cacheRoot(): File =
+        if (cacheDir.isNotBlank()) File(cacheDir) else File(LibraryScanner.dataDir(), "cache")
+
     private fun load(key: String, fallback: String): String =
         runCatching { Properties().apply { file.inputStream().use(::load) }.getProperty(key) }
             .getOrNull() ?: fallback

@@ -24,6 +24,7 @@ kotlin {
                 implementation("androidx.sqlite:sqlite-bundled:2.5.2")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
                 implementation("net.java.dev.jna:jna:5.6.0")
+                implementation("io.github.vinceglb:filekit-dialogs:0.16.0")
                 // Tag reading + javax.sound sample-rate/format SPIs for playback.
                 implementation("org.jaudiotagger:jaudiotagger:2.0.1")
                 implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")

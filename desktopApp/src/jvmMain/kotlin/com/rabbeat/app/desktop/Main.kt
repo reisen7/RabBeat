@@ -15,6 +15,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -24,6 +25,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.room.Room
@@ -47,6 +49,7 @@ import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.ui.theme.RabBeatTheme
 import java.awt.Dimension
 import java.io.File
+import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.compose.resources.painterResource
@@ -76,6 +79,7 @@ private fun debugWindowSize(): Pair<Int, Int>? = System.getProperty("rabbeat.win
     }
 
 fun main() {
+    if (!SingleInstance.acquire()) exitProcess(0)
     SingletonImageLoader.setSafe { context ->
         coil3.ImageLoader.Builder(context)
             .components {
@@ -97,11 +101,17 @@ fun main() {
     var themeTick by remember { mutableStateOf(0) }
     var appearanceTick by remember { mutableStateOf(0) }
     var windowVisible by remember { mutableStateOf(true) }
+    var activateTick by remember { mutableStateOf(0) }
+    SingleInstance.onActivate = {
+        windowVisible = true
+        activateTick++
+    }
     val startTarget = remember { System.getProperty("rabbeat.start").orEmpty() }
     val playerOpen = remember { mutableStateOf(startTarget == "nowplaying") }
     val queueOpen = remember { mutableStateOf(startTarget == "queue") }
     val playState by player.state.collectAsState()
     val windowState = rememberWindowState(
+        position = WindowPosition.Aligned(Alignment.Center),
         width = (debugWindowSize()?.first ?: settings.windowW).dp,
         height = (debugWindowSize()?.second ?: settings.windowH).dp,
     )
@@ -153,6 +163,13 @@ fun main() {
         },
     ) {
         window.minimumSize = Dimension(1000, 640)
+        LaunchedEffect(activateTick) {
+            if (activateTick > 0) {
+                window.extendedState = java.awt.Frame.NORMAL
+                window.toFront()
+                window.requestFocus()
+            }
+        }
         val themeMode = debugTheme() ?: remember(themeTick) { ThemeMode.valueOf(settings.themeMode) }
         val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
         RabBeatTheme(themeMode = themeMode, accentTheme = accent) {

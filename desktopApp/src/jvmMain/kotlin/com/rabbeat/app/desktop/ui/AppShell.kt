@@ -45,14 +45,12 @@ import com.rabbeat.app.desktop.sys.DesktopSettings
 import com.rabbeat.app.desktop.sys.DesktopUpdate
 import com.rabbeat.app.desktop.sys.HiddenSongsView
 import com.rabbeat.app.desktop.sys.SettingsView
+import com.rabbeat.app.desktop.sys.pickDirectory
 import com.rabbeat.app.domain.model.TrackQuery
 import com.rabbeat.app.domain.model.TrackSort
 import com.rabbeat.app.ui.components.LocalCardOpacity
 import com.rabbeat.app.ui.components.LocalHasBackgroundImage
 import java.io.File
-import javax.swing.JFileChooser
-import javax.swing.SwingUtilities
-import javax.swing.filechooser.FileSystemView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -69,17 +67,6 @@ private fun debugStartRoute(): DesktopRoute = when (debugStartProp()) {
 
 private fun debugAutoplay(): Boolean = System.getProperty("rabbeat.autoplay") == "true"
 
-private fun pickDirectory(onPicked: (File) -> Unit) {
-    SwingUtilities.invokeLater {
-        val chooser = JFileChooser(FileSystemView.getFileSystemView().homeDirectory).apply {
-            fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-            dialogTitle = "选择音乐文件夹"
-        }
-        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-            onPicked(chooser.selectedFile)
-        }
-    }
-}
 
 private fun TrackEntity.folderPathOf(): String = folder?.trim()?.takeIf { it.isNotEmpty() } ?: "本地"
 
@@ -111,9 +98,9 @@ fun AppShell(
     val scanner = remember { LibraryScanner(db) }
     val liked = remember { LikedPlaylist(db.playlistDao(), db.trackDao()) }
 
-    val triggerImport = {
-        pickDirectory { dir ->
-            scope.launch {
+    val triggerImport: () -> Unit = {
+        scope.launch {
+            pickDirectory("选择音乐文件夹")?.let { dir ->
                 scanText = "扫描中…"
                 val count = scanner.scan(dir) { done, total -> scanText = "扫描中 $done/$total" }
                 scanText = "已导入 $count 首"

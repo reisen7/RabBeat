@@ -82,10 +82,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import javax.swing.JFileChooser
-import javax.swing.SwingUtilities
-import javax.swing.filechooser.FileNameExtensionFilter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsView(
@@ -303,9 +302,11 @@ fun SettingsView(
                         }
                         OutlinedButton(
                             onClick = {
-                                pickImage { file ->
-                                    settings.bgImage = file.absolutePath
-                                    onAppearanceChange()
+                                scope.launch {
+                                    pickFile("选择图片", "jpg", "jpeg", "png", "webp")?.let { file ->
+                                        settings.bgImage = file.absolutePath
+                                        onAppearanceChange()
+                                    }
                                 }
                             },
                             shape = CircleShape,
@@ -352,6 +353,57 @@ fun SettingsView(
                 Spacer(Modifier.height(20.dp))
                 SectionTitle("曲库与缓存")
                 SettingsCard {
+                    var cacheTick by remember { mutableStateOf(0) }
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("缓存位置", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text(
+                                remember(cacheTick, settings.cacheDir) { settings.cacheRoot().absolutePath },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = palette.secondaryLabel,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (settings.cacheDir.isNotBlank()) {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            moveCacheContents(settings.cacheRoot(), File(LibraryScanner.dataDir(), "cache"))
+                                        }
+                                        settings.cacheDir = ""
+                                        status = "缓存位置已更改"
+                                        cacheTick++
+                                    }
+                                },
+                                modifier = Modifier.hand(),
+                            ) { Text("恢复默认") }
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    val picked = pickDirectory("选择缓存位置") ?: return@launch
+                                    val newRoot = File(picked, "RabBeatCache")
+                                    if (newRoot.absoluteFile == settings.cacheRoot().absoluteFile) return@launch
+                                    withContext(Dispatchers.IO) {
+                                        moveCacheContents(settings.cacheRoot(), newRoot)
+                                    }
+                                    settings.cacheDir = newRoot.absolutePath
+                                    status = "缓存位置已更改"
+                                    cacheTick++
+                                }
+                            },
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp).hand(),
+                        ) { Text("更改") }
+                    }
+                    CardDivider()
                     ActionSettingRow(
                         title = "已隐藏的歌曲",
                         subtitle = "查看或恢复之前隐藏的曲目",
@@ -378,9 +430,9 @@ fun SettingsView(
                         trailingText = "清理",
                         onClick = {
                             scope.launch {
-                                val dir = File(LibraryScanner.dataDir(), "cache")
+                                val dir = settings.cacheRoot()
                                 val freed = dir.listFiles()?.sumOf { it.length() } ?: 0L
-                                dir.deleteRecursively()
+                                dir.listFiles()?.forEach { it.deleteRecursively() }
                                 status = "已释放 ${fmtBytes(freed)}"
                             }
                         },
@@ -395,8 +447,8 @@ fun SettingsView(
                         subtitle = "复制曲库数据库到指定位置",
                         trailingText = "导出",
                         onClick = {
-                            pickSave("rabbeat-backup.db") { dest ->
-                                scope.launch {
+                            scope.launch {
+                                pickSave("rabbeat-backup.db")?.let { dest ->
                                     runCatching {
                                         File(LibraryScanner.dataDir(), "rabbeat.db").copyTo(dest, overwrite = true)
                                         status = "备份已导出到 ${dest.name}"
@@ -411,8 +463,8 @@ fun SettingsView(
                         subtitle = "选择备份文件覆盖当前库（需重启生效）",
                         trailingText = "选择文件",
                         onClick = {
-                            pickFile("数据库", "db") { src ->
-                                scope.launch {
+                            scope.launch {
+                                pickFile("数据库", "db")?.let { src ->
                                     runCatching {
                                         src.copyTo(File(LibraryScanner.dataDir(), "rabbeat.db"), overwrite = true)
                                         status = "已恢复，重启应用生效"
@@ -427,9 +479,11 @@ fun SettingsView(
                         subtitle = "合并最近 7 天运行日志",
                         trailingText = "导出",
                         onClick = {
-                            pickSave("rabbeat-logs-${SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())}.log") { dest ->
-                                DesktopLog.export(dest)
-                                status = "日志已导出到 ${dest.name}"
+                            scope.launch {
+                                pickSave("rabbeat-logs-${SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())}.log")?.let { dest ->
+                                    DesktopLog.export(dest)
+                                    status = "日志已导出到 ${dest.name}"
+                                }
                             }
                         },
                     )
@@ -704,6 +758,22 @@ private fun SeekSettingRow(
     }
 }
 
+private fun moveCacheContents(from: File, to: File) {
+    val files = from.listFiles() ?: return
+    to.mkdirs()
+    files.forEach { f ->
+        val dest = File(to, f.name)
+        if (!dest.exists()) {
+            runCatching {
+                if (!f.renameTo(dest)) {
+                    f.copyRecursively(dest, overwrite = false)
+                    f.deleteRecursively()
+                }
+            }
+        }
+    }
+}
+
 private fun fmtBytes(bytes: Long): String = when {
     bytes >= 1L shl 30 -> "%.1f GB".format(bytes / (1L shl 30).toDouble())
     bytes >= 1L shl 20 -> "%.1f MB".format(bytes / (1L shl 20).toDouble())
@@ -711,24 +781,6 @@ private fun fmtBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-private fun pickImage(onPicked: (File) -> Unit) =
-    pickFile("图片", "jpg", "jpeg", "png", "webp", onPicked = onPicked)
-
-private fun pickFile(desc: String, vararg ext: String, onPicked: (File) -> Unit) {
-    SwingUtilities.invokeLater {
-        val chooser = JFileChooser(javax.swing.filechooser.FileSystemView.getFileSystemView().homeDirectory)
-        chooser.fileFilter = FileNameExtensionFilter(desc, *ext)
-        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) onPicked(chooser.selectedFile)
-    }
-}
-
-private fun pickSave(defaultName: String, onPicked: (File) -> Unit) {
-    SwingUtilities.invokeLater {
-        val chooser = JFileChooser(javax.swing.filechooser.FileSystemView.getFileSystemView().homeDirectory)
-        chooser.selectedFile = File(chooser.currentDirectory, defaultName)
-        if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) onPicked(chooser.selectedFile)
-    }
-}
 
 @Composable
 fun HiddenSongsView(db: RabBeatDatabase, onBack: () -> Unit) {
