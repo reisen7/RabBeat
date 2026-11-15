@@ -6,12 +6,22 @@ import com.rabbeat.app.desktop.sys.*
 
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -23,15 +33,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.compositionLocalOf
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.entity.TrackEntity
 import com.rabbeat.app.data.local.mapper.toDomain
+import com.rabbeat.app.desktop.ui.hand
+import com.rabbeat.app.domain.model.UserPlaylist
 import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.EmptyState
+import com.rabbeat.app.ui.components.PlaylistCover
 import kotlinx.coroutines.launch
 
 val LocalLikedPlaylist = compositionLocalOf<LikedPlaylist?> { null }
@@ -101,27 +119,70 @@ private fun PlaylistPickerDialog(
     onPick: (String) -> Unit,
 ) {
     val playlists by db.playlistDao().observeAll().collectAsState(initial = emptyList())
+    val counts by db.playlistDao().observeVisibleCounts().collectAsState(initial = emptyList())
+    val artworks by db.playlistDao().observeLatestArtwork().collectAsState(initial = emptyList())
+    val countMap = remember(counts) { counts.associate { it.playlistId to it.trackCount } }
+    val artMap = remember(artworks) { artworks.associate { it.playlistId to it.artworkUri } }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加到歌单") },
+        title = { Text("添加到歌单", fontWeight = FontWeight.SemiBold) },
         text = {
             if (playlists.isEmpty()) {
                 EmptyState(message = "还没有歌单，先在左侧建一个")
             } else {
-                LazyColumn(Modifier.fillMaxWidth()) {
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
                     items(playlists, key = { it.id }) { playlist ->
-                        Text(
-                            playlist.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier
+                        val interactionSource = remember { MutableInteractionSource() }
+                        val hovered by interactionSource.collectIsHoveredAsState()
+                        val count = countMap[playlist.id] ?: 0
+                        Row(
+                            Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (hovered) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                                    else Color.Transparent,
+                                )
+                                .hoverable(interactionSource)
+                                .hand()
                                 .clickable { onPick(playlist.id) }
-                                .padding(vertical = 10.dp),
-                        )
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            PlaylistCover(
+                                UserPlaylist(
+                                    id = playlist.id,
+                                    name = playlist.name,
+                                    trackCount = count,
+                                    updatedAt = playlist.updatedAt,
+                                    isSystem = playlist.isSystem,
+                                    coverUri = playlist.coverUri,
+                                    autoCoverUri = artMap[playlist.id],
+                                ),
+                                size = 38.dp,
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    playlist.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    "$count 首",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.hand()) { Text("取消") }
+        },
     )
 }

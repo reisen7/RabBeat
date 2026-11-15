@@ -167,7 +167,11 @@ class LibraryScanner(private val db: RabBeatDatabase) {
             "ncm", "mgg", "qmc", "mflac", "tkm", "ofl_en", "ofc",
         )
 
-        fun dataDir(): File = File(System.getProperty("user.home"), ".rabbeat")
+        fun dataDir(): File {
+            System.getProperty("rabbeat.dataDir")?.takeIf { it.isNotBlank() }?.let { return File(it) }
+            System.getenv("RABBEAT_DATA_DIR")?.takeIf { it.isNotBlank() }?.let { return File(it) }
+            return File(System.getProperty("user.home"), ".rabbeat")
+        }
 
         private fun sha1(text: String): String {
             val digest = MessageDigest.getInstance("SHA-1").digest(text.toByteArray())

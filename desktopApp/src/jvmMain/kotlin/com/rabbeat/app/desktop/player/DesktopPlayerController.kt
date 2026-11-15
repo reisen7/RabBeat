@@ -43,11 +43,19 @@ import kotlinx.serialization.json.Json
 class DesktopPlayerController(
     private val db: RabBeatDatabase,
     private val scope: CoroutineScope,
+    private val settings: DesktopSettings = DesktopSettings(),
 ) : PlaybackController {
 
     private val json = Json { ignoreUnknownKeys = true }
     private val _state = MutableStateFlow(PlaybackUiState(restoring = false))
     override val state = _state.asStateFlow()
+
+    private val _loading = MutableStateFlow(false)
+    val loading = _loading.asStateFlow()
+    private val _volume = MutableStateFlow(settings.volume.coerceIn(0f, 1f))
+    val volume = _volume.asStateFlow()
+    private val _muted = MutableStateFlow(settings.muted)
+    val muted = _muted.asStateFlow()
 
     private var queue: List<Track> = emptyList()
     private var index: Int = -1
@@ -63,12 +71,18 @@ class DesktopPlayerController(
     private val ncm = NcmDecoderCore(decodeDir)
     private val qmc = QmcDecoderCore(decodeDir)
 
-    private var line: SourceDataLine? = null
-    private var stream: AudioInputStream? = null
+    private val lineLock = Any()
+    @Volatile private var line: SourceDataLine? = null
+    @Volatile private var stream: AudioInputStream? = null
     private var playJob: Job? = null
-    private var paused = false
-    private var basePositionMs = 0L
-    private var generation = 0
+    @Volatile private var paused = false
+    @Volatile private var basePositionMs = 0L
+    @Volatile private var generation = 0
+
+    private var consecutiveFailures = 0
+    private val shuffleHistory = ArrayDeque<Int>()
+    private val shufflePlayed = mutableSetOf<Int>()
+    private var prefetchFor: String? = null
 
     private var restored = false
 
@@ -85,6 +99,8 @@ class DesktopPlayerController(
         if (tracks.isEmpty()) return
         queue = tracks
         index = startIndex.coerceIn(tracks.indices)
+        shuffleHistory.clear()
+        shufflePlayed.clear()
         startTrack(seekMs = 0L, play = true)
     }
 
@@ -111,13 +127,17 @@ class DesktopPlayerController(
     override fun previous() {
         if (_state.value.positionMs > 3_000L) {
             seekTo(0L)
+        } else if (shuffle && shuffleHistory.isNotEmpty()) {
+            index = shuffleHistory.removeLast()
+            startTrack(0L, play = true)
         } else {
             advance(-1)
         }
     }
 
     override fun seekTo(positionMs: Long) {
-        val target = positionMs.coerceAtLeast(0L)
+        val duration = queue.getOrNull(index)?.durationMs ?: 0L
+        val target = positionMs.coerceIn(0L, if (duration > 0L) duration else Long.MAX_VALUE)
         val wasPlaying = _state.value.isPlaying || line != null
         if (!wasPlaying) {
             publish(false)
@@ -125,16 +145,16 @@ class DesktopPlayerController(
             return
         }
         startTrack(seekMs = target, play = !paused)
-        if (paused) {
-            // Reopen but stay paused: stop right after the line starts.
-            paused = true
-            runCatching { line?.stop() }
-            publish(false)
-        }
     }
 
     override fun toggleShuffle() {
         shuffle = !shuffle
+        if (shuffle) {
+            queue.getOrNull(index)?.let { shufflePlayed += index }
+        } else {
+            shuffleHistory.clear()
+            shufflePlayed.clear()
+        }
         publish(_state.value.isPlaying)
     }
 
@@ -186,7 +206,16 @@ class DesktopPlayerController(
 
     /** Desktop-only volume — not part of the shared interface (Android uses system volume). */
     fun setVolume(fraction: Float) {
-        userVolume = fraction.coerceIn(0f, 1f)
+        val v = fraction.coerceIn(0f, 1f)
+        _volume.value = v
+        settings.volume = v
+        applyGain()
+    }
+
+    fun toggleMute() {
+        val m = !_muted.value
+        _muted.value = m
+        settings.muted = m
         applyGain()
     }
 
@@ -215,6 +244,8 @@ class DesktopPlayerController(
     override fun moveQueueItem(from: Int, to: Int) {
         queue = QueueManager.move(queue, from, to)
         index = QueueManager.shiftedIndex(index, from, to)
+        shuffleHistory.clear()
+        shufflePlayed.clear()
         publish(_state.value.isPlaying)
         scope.launch { persist() }
     }
@@ -234,6 +265,8 @@ class DesktopPlayerController(
         } else {
             publish(_state.value.isPlaying && queue.isNotEmpty())
         }
+        shuffleHistory.clear()
+        shufflePlayed.clear()
         scope.launch { persist() }
     }
 
@@ -241,48 +274,90 @@ class DesktopPlayerController(
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)
         index = if (current == null) -1 else 0
+        shuffleHistory.clear()
+        shufflePlayed.clear()
         publish(_state.value.isPlaying)
         scope.launch { persist() }
     }
 
     // --- engine ---
 
-    private fun advance(delta: Int) {
+    private fun advance(delta: Int, play: Boolean = true) {
         if (queue.isEmpty()) return
-        val next = if (shuffle && queue.size > 1) {
-            (queue.indices - index).random()
+        val next = if (delta > 0 && shuffle && queue.size > 1) {
+            val unplayed = queue.indices.filter { it != index && it !in shufflePlayed }
+            when {
+                unplayed.isNotEmpty() -> unplayed.random()
+                repeatMode == RepeatMode.ALL -> {
+                    shufflePlayed.clear()
+                    (queue.indices - index).random()
+                }
+                else -> -1
+            }
         } else {
             (index + delta).let { if (repeatMode == RepeatMode.ALL) Math.floorMod(it, queue.size) else it.coerceIn(queue.indices) }
         }
+        if (next !in queue.indices) { publish(_state.value.isPlaying); return }
+        if (delta > 0 && shuffle) shuffleHistory.addLast(index)
         index = next
-        startTrack(0L, play = _state.value.isPlaying || delta != 0)
+        startTrack(0L, play = play)
     }
 
     private fun startTrack(seekMs: Long, play: Boolean) {
         val track = queue.getOrNull(index) ?: return
-        val gen = ++generation
+        val gen = synchronized(lineLock) { ++generation }
         playJob?.cancel()
         closeLine()
+        _loading.value = true
         playJob = scope.launch(Dispatchers.IO) {
-            val prepared = prepareLine(track, seekMs) ?: run {
-                error = "无法解码 ${track.title}"
-                publish(false)
+            val prepared = prepareLine(track, seekMs)
+            if (prepared == null) {
+                onTrackFailed(gen)
                 return@launch
             }
             if (gen != generation) {
-                prepared.second.use { }
-                prepared.first.close()
+                runCatching { prepared.second.close() }
+                runCatching { prepared.first.close() }
                 return@launch
+            }
+            synchronized(lineLock) {
+                if (gen != generation) {
+                    runCatching { prepared.second.close() }
+                    runCatching { prepared.first.close() }
+                    return@launch
+                }
+                stream = prepared.second
+                line = prepared.first
             }
             basePositionMs = seekMs
             paused = !play
+            error = null
+            consecutiveFailures = 0
+            applyGain()
             if (play) prepared.first.start() else prepared.first.stop()
+            _loading.value = false
             publish(play)
+            if (shuffle) shufflePlayed += index
             persist()
             val ended = pump(prepared.first, prepared.second, gen)
             closeLine()
             if (ended && gen == generation) onTrackEnded()
         }
+    }
+
+    /** A track that failed to decode keeps the error, then auto-skips until the cap. */
+    private suspend fun onTrackFailed(gen: Int) {
+        if (gen != generation) return
+        consecutiveFailures++
+        if (shuffle) shufflePlayed += index
+        error = error ?: "无法解码 ${queue.getOrNull(index)?.title ?: ""}"
+        _loading.value = false
+        publish(false)
+        if (consecutiveFailures >= minOf(queue.size, 5).coerceAtLeast(1)) return
+        val hasNext = index < queue.lastIndex || (repeatMode == RepeatMode.ALL && queue.size > 1)
+        if (!hasNext) return
+        delay(1_000)
+        if (gen == generation) advance(1)
     }
 
     /** Returns the open line + decoded PCM stream, or null when undecodable. */
@@ -361,11 +436,17 @@ class DesktopPlayerController(
         when (repeatMode) {
             RepeatMode.ONE -> startTrack(0L, play = true)
             else -> {
-                val hasNext = index < queue.lastIndex || repeatMode == RepeatMode.ALL
+                val hasNext = if (shuffle && queue.size > 1) {
+                    queue.indices.any { it != index && it !in shufflePlayed } || repeatMode == RepeatMode.ALL
+                } else {
+                    index < queue.lastIndex || repeatMode == RepeatMode.ALL
+                }
                 if (hasNext) {
                     advance(1)
                 } else {
                     publish(false)
+                    _state.value = _state.value.copy(positionMs = 0L)
+                    basePositionMs = 0L
                     scope.launch { persist() }
                 }
             }
@@ -378,10 +459,12 @@ class DesktopPlayerController(
     }
 
     private fun closeLine() {
-        runCatching { stream?.close() }
-        runCatching { line?.close() }
-        stream = null
-        line = null
+        synchronized(lineLock) {
+            runCatching { stream?.close() }
+            runCatching { line?.close() }
+            stream = null
+            line = null
+        }
     }
 
     private fun publish(playing: Boolean) {
@@ -407,10 +490,9 @@ class DesktopPlayerController(
         return basePositionMs + (l.longFramePosition * 1000L / 44100L)
     }
 
-    @Volatile private var userVolume = 1f
     @Volatile private var fadeFactor = 1f
 
-    private fun applyGain() = setGain(userVolume * fadeFactor)
+    private fun applyGain() = setGain(if (_muted.value) 0f else _volume.value * fadeFactor)
 
     private fun setGain(fraction: Float) {
         runCatching {
@@ -420,9 +502,12 @@ class DesktopPlayerController(
         }
     }
 
+    internal fun gainControl(): FloatControl? =
+        line?.getControl(FloatControl.Type.MASTER_GAIN) as? FloatControl
+
     private suspend fun watchProgress() {
         while (scope.isActive) {
-            delay(500)
+            delay(200)
             if (_state.value.isPlaying) {
                 _state.value = _state.value.copy(positionMs = currentPositionMs())
                 val now = System.currentTimeMillis()
@@ -430,8 +515,30 @@ class DesktopPlayerController(
                     lastPersistAt = now
                     persist()
                 }
+                maybePrefetchNext()
             }
         }
+    }
+
+    /** Once past half the track, warm the next track's source (cache/decrypt) on IO. */
+    private fun maybePrefetchNext() {
+        val current = queue.getOrNull(index) ?: return
+        if (current.durationMs <= 0L || currentPositionMs() < current.durationMs / 2) return
+        val candidate = peekNextIndex()?.let { queue.getOrNull(it) } ?: return
+        if (prefetchFor == candidate.id) return
+        prefetchFor = candidate.id
+        scope.launch(Dispatchers.IO) { runCatching { resolveSource(candidate) } }
+    }
+
+    private fun peekNextIndex(): Int? {
+        if (queue.isEmpty() || index !in queue.indices) return null
+        if (repeatMode == RepeatMode.ONE) return index
+        if (shuffle && queue.size > 1) {
+            val unplayed = queue.indices.filter { it != index && it !in shufflePlayed }
+            if (unplayed.isNotEmpty()) return unplayed.random()
+            return if (repeatMode == RepeatMode.ALL) (queue.indices - index).random() else null
+        }
+        return if (index < queue.lastIndex) index + 1 else if (repeatMode == RepeatMode.ALL) 0 else null
     }
 
     private suspend fun persist() {
@@ -457,6 +564,7 @@ class DesktopPlayerController(
         val byId = entities.associateBy { it.id }
         queue = ids.mapNotNull { byId[it]?.toDomain(null) }
         index = queue.indexOfFirst { it.id == saved.trackId }.let { if (it < 0) 0 else it }
+        basePositionMs = saved.positionMs
         _state.value = _state.value.copy(positionMs = saved.positionMs)
         publish(false)
     }

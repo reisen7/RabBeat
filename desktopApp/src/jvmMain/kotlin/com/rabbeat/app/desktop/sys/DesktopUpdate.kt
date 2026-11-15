@@ -5,8 +5,6 @@ import com.rabbeat.app.desktop.playlist.*
 import com.rabbeat.app.desktop.net.*
 
 import java.awt.Desktop
-import java.awt.SystemTray
-import java.awt.TrayIcon
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -49,14 +47,5 @@ object DesktopUpdate {
 
     fun browse(url: String) = runCatching {
         if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(URI(url))
-    }
-}
-
-/** Balloon notification via the AWT tray icon created by the Compose Tray. */
-object DesktopNotify {
-    fun trackChanged(title: String, artist: String) = runCatching {
-        if (!SystemTray.isSupported()) return@runCatching
-        SystemTray.getSystemTray().trayIcons.firstOrNull()
-            ?.displayMessage(title, artist, TrayIcon.MessageType.INFO)
     }
 }

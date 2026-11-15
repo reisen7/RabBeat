@@ -9,10 +9,12 @@ import java.util.Properties
 
 /** Tiny in-app navigation state — desktop has no back stack framework. */
 sealed interface DesktopRoute {
+    data object Home : DesktopRoute
     data object Library : DesktopRoute
     data object RecentAdded : DesktopRoute
     data object MostPlayed : DesktopRoute
     data object Playlists : DesktopRoute
+    data object Search : DesktopRoute
     data class AlbumDetail(val albumId: String) : DesktopRoute
     data class ArtistDetail(val artistId: String) : DesktopRoute
     data class PlaylistDetail(val playlistId: String) : DesktopRoute
@@ -39,11 +41,20 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var cardOpacity: Float = load("cardOpacity", "0.3").toFloatOrNull() ?: 0.3f
         set(value) { field = value; save("cardOpacity", value.toString()) }
 
-    var windowW: Int = load("windowW", "1080").toIntOrNull() ?: 1080
+    var windowW: Int = load("windowW", "1280").toIntOrNull() ?: 1280
         set(value) { field = value; save("windowW", value.toString()) }
 
-    var windowH: Int = load("windowH", "720").toIntOrNull() ?: 720
+    var windowH: Int = load("windowH", "820").toIntOrNull() ?: 820
         set(value) { field = value; save("windowH", value.toString()) }
+
+    var volume: Float = load("volume", "1").toFloatOrNull() ?: 1f
+        set(value) { field = value; save("volume", value.toString()) }
+
+    var muted: Boolean = load("muted", "false").toBoolean()
+        set(value) { field = value; save("muted", value.toString()) }
+
+    var closeToTray: Boolean = load("closeToTray", "true").toBoolean()
+        set(value) { field = value; save("closeToTray", value.toString()) }
 
     private fun load(key: String, fallback: String): String =
         runCatching { Properties().apply { file.inputStream().use(::load) }.getProperty(key) }

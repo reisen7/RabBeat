@@ -20,13 +20,20 @@ kotlin {
                 implementation(libs.kotlinx.serialization.json)
                 implementation(project(":core"))
                 implementation(project(":sharedUi"))
+                implementation(libs.coil.compose)
                 implementation("androidx.sqlite:sqlite-bundled:2.5.2")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
+                implementation("net.java.dev.jna:jna:5.6.0")
                 // Tag reading + javax.sound sample-rate/format SPIs for playback.
                 implementation("org.jaudiotagger:jaudiotagger:2.0.1")
                 implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")
                 implementation("org.jflac:jflac-codec:1.5.2")
                 implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
+            }
+        }
+        named("jvmTest") {
+            dependencies {
+                implementation(kotlin("test"))
             }
         }
     }
@@ -74,6 +81,25 @@ compose.desktop {
 // jvmArgs only reach the packaged launchers).
 tasks.withType<JavaExec>().configureEach {
     systemProperty("rabbeat.version", desktopVersion)
+    providers.gradleProperty("rabbeat.dataDir").orNull?.let {
+        systemProperty("rabbeat.dataDir", it)
+    }
+    listOf("rabbeat.start", "rabbeat.theme", "rabbeat.window", "rabbeat.autoplay").forEach { p ->
+        providers.gradleProperty(p).orNull?.let { systemProperty(p, it) }
+    }
+}
+
+val jvmTestComp = kotlin.targets.getByName("jvm").compilations.getByName("test")
+
+// Seeds a realistic demo library; -Prabbeat.dataDir overrides the output dir.
+tasks.register<JavaExec>("seedDemoLibrary") {
+    group = "demo"
+    description = "Build a demo music library into build/demo-data (or -Prabbeat.dataDir)"
+    dependsOn(jvmTestComp.compileTaskProvider)
+    classpath = files(jvmTestComp.runtimeDependencyFiles, jvmTestComp.output.allOutputs)
+    mainClass.set("com.rabbeat.app.desktop.player.DemoSeederKt")
+    args(providers.gradleProperty("rabbeat.dataDir").orNull
+        ?: layout.buildDirectory.dir("demo-data").get().asFile.absolutePath)
 }
 
 // Portable zip of the jpackage app image (no installer, no admin needed).
