@@ -7,14 +7,20 @@ import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
 sealed interface UpdateResult {
-    /** tag_name of the newest release and the page to open. */
-    data class Available(val tag: String, val url: String) : UpdateResult
+    /** tag_name of the newest release, its notes, the page URL and the direct APK URL. */
+    data class Available(
+        val tag: String,
+        val url: String,
+        val notes: String,
+        val downloadUrl: String,
+    ) : UpdateResult
     data object Latest : UpdateResult
     data object Failed : UpdateResult
 }
@@ -46,10 +52,20 @@ class UpdateChecker @Inject constructor(
                         val obj = json.parseToJsonElement(response.body?.string() ?: "").jsonObject
                         val tag = obj["tag_name"]?.jsonPrimitive?.content
                         val url = obj["html_url"]?.jsonPrimitive?.content ?: RELEASES_PAGE
+                        val notes = obj["body"]?.jsonPrimitive?.content.orEmpty()
+                        val apk = obj["assets"]?.jsonArray?.firstNotNullOfOrNull { asset ->
+                            asset.jsonObject["browser_download_url"]
+                                ?.jsonPrimitive?.content
+                                ?.takeIf { it.endsWith(".apk", ignoreCase = true) }
+                        }
                         when {
                             tag == null -> null
-                            isNewer(tag, BuildConfig.VERSION_NAME) ->
-                                UpdateResult.Available(tag, "${route.web}$url")
+                            isNewer(tag, BuildConfig.VERSION_NAME) -> UpdateResult.Available(
+                                tag,
+                                "${route.web}$url",
+                                notes,
+                                "${route.web}${apk ?: url}",
+                            )
                             else -> UpdateResult.Latest
                         }
                     }

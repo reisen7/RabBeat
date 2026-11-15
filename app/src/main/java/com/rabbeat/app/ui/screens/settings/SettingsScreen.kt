@@ -688,14 +688,46 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { updateResult = null },
             title = { Text(stringResource(R.string.update_available_title)) },
-            text = { Text(stringResource(R.string.update_available_body, update.tag)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.update_available_body, update.tag))
+                    if (update.notes.isNotBlank()) {
+                        Text(
+                            stringResource(R.string.update_notes),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                        )
+                        Column(
+                            Modifier
+                                .heightIn(max = 240.dp)
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.fill)
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp),
+                        ) {
+                            Text(
+                                update.notes.trim(),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     updateResult = null
-                    context.startActivity(Intent(Intent.ACTION_VIEW, update.url.toUri()))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, update.downloadUrl.toUri()))
                 }) { Text(stringResource(R.string.action_download)) }
             },
-            dismissButton = { TextButton(onClick = { updateResult = null }) { Text(stringResource(R.string.action_later)) } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, update.url.toUri()))
+                    }) { Text(stringResource(R.string.update_open_page)) }
+                    TextButton(onClick = { updateResult = null }) { Text(stringResource(R.string.action_later)) }
+                }
+            },
         )
     }
 }
