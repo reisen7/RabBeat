@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "RabBeat"
 include(":app")
 include(":core")
+include(":desktopApp")

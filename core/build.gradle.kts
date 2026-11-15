@@ -30,10 +30,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.serialization.json)
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-            implementation("androidx.paging:paging-common:3.5.3")
-            implementation(libs.androidx.room.runtime)
             implementation(libs.androidx.room.paging)
+            api("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+            api("androidx.paging:paging-common:3.5.3")
+            api(libs.androidx.room.runtime)
         }
         jvmCommonMain.dependencies {
             implementation("javax.inject:javax.inject:1")
