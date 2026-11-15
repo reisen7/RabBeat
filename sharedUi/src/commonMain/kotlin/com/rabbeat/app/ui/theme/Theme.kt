@@ -87,6 +87,7 @@ private fun lightScheme(accent: AccentPalette, palette: RabBeatPalette) = lightC
 fun RabBeatTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     accentTheme: AccentTheme = AccentTheme.ROSE,
+    darkPalette: RabBeatPalette = DarkRabBeatPalette,
     content: @Composable () -> Unit,
 ) {
     val dark = when (themeMode) {
@@ -95,7 +96,7 @@ fun RabBeatTheme(
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
     val accent = accentTheme.palette(dark)
-    val palette = if (dark) DarkRabBeatPalette else LightRabBeatPalette
+    val palette = if (dark) darkPalette else LightRabBeatPalette
     val colors = if (dark) darkScheme(accent, palette) else lightScheme(accent, palette)
     SystemBarsEffect(dark)
     CompositionLocalProvider(

@@ -172,9 +172,12 @@ fun main() {
         }
         val themeMode = debugTheme() ?: remember(themeTick) { ThemeMode.valueOf(settings.themeMode) }
         val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
-        RabBeatTheme(themeMode = themeMode, accentTheme = accent) {
-            val isDark = LocalRabBeatPalette.current.isDark
-            LaunchedEffect(window, isDark) { WindowsTitleBar.apply(window, isDark) }
+        RabBeatTheme(themeMode = themeMode, accentTheme = accent, darkPalette = DesktopDarkPalette) {
+            val activePalette = LocalRabBeatPalette.current
+            val isDark = activePalette.isDark
+            LaunchedEffect(window, isDark, activePalette.background) {
+                WindowsTitleBar.apply(window, isDark, activePalette.background)
+            }
             Surface(Modifier.fillMaxSize()) {
                 key(appearanceTick) {
                     AppShell(
