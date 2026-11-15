@@ -30,6 +30,7 @@ import com.rabbeat.app.util.ArtworkCache
 import com.rabbeat.app.util.LyricReader
 import com.rabbeat.app.util.Mp3DurationReader
 import com.rabbeat.app.util.NcmDecoder
+import com.rabbeat.app.util.NcmDecoderCore
 import com.rabbeat.app.util.OggCover
 import com.rabbeat.app.util.QmcDecoder
 import com.rabbeat.app.util.ScanProgress
@@ -467,10 +468,10 @@ class LocalMediaScanner @Inject constructor(
         }
     }
 
-    private fun decodeEncrypted(name: String, uri: Uri, cacheKey: String): NcmDecoder.Decoded? = when {
+    private fun decodeEncrypted(name: String, uri: Uri, cacheKey: String): NcmDecoderCore.Decoded? = when {
         isNcm(name) -> ncm.decode(uri, cacheKey)
         QmcDecoder.isQmc(name) -> qmc.decode(uri, cacheKey)
-            ?.let { NcmDecoder.Decoded(it.file, it.mimeType, null) }
+            ?.let { NcmDecoderCore.Decoded(it.file, it.mimeType, null) }
         else -> null
     }
 

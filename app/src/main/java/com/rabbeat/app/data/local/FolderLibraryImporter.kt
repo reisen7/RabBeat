@@ -311,7 +311,7 @@ class FolderLibraryImporter @Inject constructor(
             com.rabbeat.app.util.QmcDecoder.isQmc(name) -> {
                 val result = qmc.decode(uri, "$docId:${size}:${file.lastModified()}") ?: return null
                 if (!result.file.isFile) return null
-                com.rabbeat.app.util.NcmDecoder.Decoded(result.file, result.mimeType, null)
+                com.rabbeat.app.util.NcmDecoderCore.Decoded(result.file, result.mimeType, null)
             }
             else -> null
         }

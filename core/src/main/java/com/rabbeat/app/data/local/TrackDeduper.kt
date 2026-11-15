@@ -2,21 +2,8 @@ package com.rabbeat.app.data.local
 
 import java.text.Normalizer
 import kotlin.math.abs
-import com.rabbeat.app.data.local.entity.TrackEntity
 
-internal fun TrackEntity.toCandidate(): DupCandidate = DupCandidate(
-    id = id,
-    title = title,
-    artist = artist,
-    album = album,
-    durationMs = durationMs,
-    fileSize = fileSize,
-    mimeType = mimeType,
-    folder = folder,
-    hidden = hidden,
-)
-
-internal data class DupCandidate(
+data class DupCandidate(
     val id: String,
     val title: String,
     val artist: String,
@@ -29,20 +16,20 @@ internal data class DupCandidate(
 )
 
 /** Same non-null directory + same song identity means the same physical file. */
-internal fun sameFolder(a: String?, b: String?): Boolean =
+fun sameFolder(a: String?, b: String?): Boolean =
     a != null && a.trimEnd('/') == b?.trimEnd('/')
 
-internal data class DedupeResult(
+data class DedupeResult(
     val keptIds: Set<String>,
     val replaced: Map<String, String>,
 )
 
-internal data class DedupePlan(
+data class DedupePlan(
     val keptIds: Set<String>,
     val replaced: Map<String, String>,
 )
 
-internal object TrackDeduper {
+object TrackDeduper {
     private val LOSSLESS = setOf("flac", "wav", "x-wav", "alac", "ape", "aiff", "x-aiff")
 
     fun dedupe(candidates: List<DupCandidate>, existingIds: Set<String>, hiddenIds: Set<String> = emptySet()): DedupeResult {
