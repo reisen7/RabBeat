@@ -1,4 +1,8 @@
-package com.rabbeat.app.desktop
+package com.rabbeat.app.desktop.sys
+import com.rabbeat.app.desktop.player.*
+import com.rabbeat.app.desktop.library.*
+import com.rabbeat.app.desktop.playlist.*
+import com.rabbeat.app.desktop.net.*
 
 import java.awt.Desktop
 import java.awt.SystemTray
@@ -16,7 +20,7 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** GitHub Releases check — same API as the Android UpdateChecker. */
 object DesktopUpdate {
-    const val CURRENT = "0.1.0"
+    val CURRENT: String get() = System.getProperty("rabbeat.version") ?: "0.0.0-dev"
     private const val API = "https://api.github.com/repos/reisen7/RabBeat/releases/latest"
     private val json = Json { ignoreUnknownKeys = true }
 

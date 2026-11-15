@@ -32,6 +32,19 @@ kotlin {
     }
 }
 
+// Same versioning as :app — latest git tag, -PversionName override wins.
+val tagVersion = runCatching {
+    providers.exec {
+        commandLine("git", "describe", "--tags", "--abbrev=0")
+    }.standardOutput.asText.get().trim().removePrefix("v")
+}.getOrDefault("")
+
+val desktopVersion = providers.gradleProperty("versionName").orNull?.takeIf { it.isNotBlank() }
+    ?: tagVersion.ifBlank { "0.0.0-dev" }
+
+// jpackage only accepts dotted-numeric versions; strip any suffix.
+val numericVersion = Regex("""\d+\.\d+\.\d+""").find(desktopVersion)?.value ?: "0.0.0"
+
 compose.desktop {
     application {
         mainClass = "com.rabbeat.app.desktop.MainKt"
@@ -39,12 +52,14 @@ compose.desktop {
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
             packageName = "RabBeat"
-            packageVersion = "0.1.0"
+            packageVersion = numericVersion
             description = "RabBeat - local music player"
             vendor = "RabBeat"
             // Cap heap: a runaway list would OOM inside the app instead of
             // pressuring the whole machine.
-            jvmArgs("-Xmx1g", "-Dfile.encoding=UTF-8")
+            // No -Dfile.encoding=UTF-8: on GBK Windows it desyncs AWT tray
+            // menus (PopupMenu labels encode via file.encoding → mojibake).
+            jvmArgs("-Xmx1g", "-Drabbeat.version=$desktopVersion")
 
             windows {
                 menuGroup = "RabBeat"
@@ -55,6 +70,12 @@ compose.desktop {
     }
 }
 
+// `./gradlew :desktopApp:run` also gets the version (nativeDistributions
+// jvmArgs only reach the packaged launchers).
+tasks.withType<JavaExec>().configureEach {
+    systemProperty("rabbeat.version", desktopVersion)
+}
+
 // Portable zip of the jpackage app image (no installer, no admin needed).
 tasks.register<Zip>("packagePortableZip") {
     group = "compose desktop"
@@ -62,6 +83,6 @@ tasks.register<Zip>("packagePortableZip") {
     dependsOn("createDistributable")
     val appDir = layout.buildDirectory.dir("compose/binaries/main/app/RabBeat")
     from(appDir)
-    archiveFileName.set("RabBeat-0.1.0-portable.zip")
+    archiveFileName.set("RabBeat-$desktopVersion-portable.zip")
     destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main/portable"))
 }

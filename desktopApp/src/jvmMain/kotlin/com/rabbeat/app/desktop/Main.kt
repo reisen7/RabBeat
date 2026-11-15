@@ -1,4 +1,9 @@
 package com.rabbeat.app.desktop
+import com.rabbeat.app.desktop.player.*
+import com.rabbeat.app.desktop.library.*
+import com.rabbeat.app.desktop.playlist.*
+import com.rabbeat.app.desktop.net.*
+import com.rabbeat.app.desktop.sys.*
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -63,7 +68,7 @@ import com.rabbeat.app.domain.model.ThemeMode
 import com.rabbeat.app.domain.model.TrackQuery
 import com.rabbeat.app.domain.model.TrackSort
 import com.rabbeat.app.sharedui.generated.resources.Res
-import com.rabbeat.app.sharedui.generated.resources.ic_launcher_foreground
+import com.rabbeat.app.sharedui.generated.resources.ic_desktop_icon
 import com.rabbeat.app.ui.components.MiniPlayerBar
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.RabBeatTheme
@@ -336,11 +341,6 @@ private fun NavRailItem(label: String, selected: Boolean, onClick: () -> Unit) {
 
 private fun TrackEntity.folderPathOf(): String = folder?.trim()?.takeIf { it.isNotEmpty() } ?: "本地"
 
-fun formatMs(ms: Long): String {
-    val total = (ms / 1000).coerceAtLeast(0)
-    return "%d:%02d".format(total / 60, total % 60)
-}
-
 fun main() = application {
     val db = openDatabase()
     val appScope = remember { CoroutineScope(Dispatchers.Main) }
@@ -357,7 +357,7 @@ fun main() = application {
     )
 
     Tray(
-        icon = painterResource(Res.drawable.ic_launcher_foreground),
+        icon = painterResource(Res.drawable.ic_desktop_icon),
         tooltip = "RabBeat",
         onAction = { windowVisible = true },
         menu = {
@@ -382,6 +382,7 @@ fun main() = application {
             windowVisible = false  // close → minimize to tray
         },
         title = "RabBeat",
+        icon = painterResource(Res.drawable.ic_desktop_icon),
         state = windowState,
         onPreviewKeyEvent = { e ->
             if (e.type != KeyEventType.KeyUp) return@Window false

@@ -1,4 +1,8 @@
-package com.rabbeat.app.desktop
+package com.rabbeat.app.desktop.sys
+import com.rabbeat.app.desktop.player.*
+import com.rabbeat.app.desktop.library.*
+import com.rabbeat.app.desktop.playlist.*
+import com.rabbeat.app.desktop.net.*
 
 import java.io.File
 import java.text.SimpleDateFormat
@@ -20,7 +24,7 @@ object DesktopLog {
     private fun write(level: String, tag: String, msg: String) {
         runCatching {
             File(dir, "${day.format(Date())}.log")
-                .appendText("${time.format(Date())} $level/$tag $msg\n")
+                .appendText("${time.format(Date())} $level/$tag $msg\n", Charsets.UTF_8)
         }
     }
 
@@ -33,8 +37,9 @@ object DesktopLog {
     fun export(target: File): File {
         target.writeText(
             dir.listFiles()?.sortedBy { it.name }
-                ?.joinToString("") { "=== ${it.name} ===\n" + it.readText() }
+                ?.joinToString("") { "=== ${it.name} ===\n" + it.readText(Charsets.UTF_8) }
                 .orEmpty(),
+            Charsets.UTF_8,
         )
         return target
     }

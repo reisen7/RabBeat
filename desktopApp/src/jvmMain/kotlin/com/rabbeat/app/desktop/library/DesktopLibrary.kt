@@ -1,4 +1,8 @@
-package com.rabbeat.app.desktop
+package com.rabbeat.app.desktop.library
+import com.rabbeat.app.desktop.player.*
+import com.rabbeat.app.desktop.playlist.*
+import com.rabbeat.app.desktop.net.*
+import com.rabbeat.app.desktop.sys.*
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
