@@ -16,6 +16,16 @@ interface LyricLinkDao {
     @Query("DELETE FROM lyric_links WHERE trackId = :trackId")
     suspend fun delete(trackId: String)
 
+    @Query("DELETE FROM lyric_links WHERE trackId IN (:ids)")
+    suspend fun deleteForTracks(ids: List<String>)
+
+    @Query(
+        "DELETE FROM lyric_links WHERE trackId IN (" +
+            "SELECT id FROM tracks WHERE (sourceId = 'dsk_local' AND IFNULL(folder, '') != '来自手机') " +
+            "OR sourceId = 'src_device' OR sourceId LIKE 'fld\\_%' ESCAPE '\\')",
+    )
+    suspend fun deleteScanned()
+
     @Query("DELETE FROM lyric_links WHERE trackId LIKE 'trk\\_%' ESCAPE '\\' OR sourceTrackId LIKE 'trk\\_%' ESCAPE '\\'")
     suspend fun deleteDemo()
 }

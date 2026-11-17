@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -276,7 +277,7 @@ fun HomePage(
         }
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(scrollState),
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
         )
     }
 }
@@ -378,6 +379,7 @@ private fun HomeTrackSquareCard(
         )
         Text(
             track.artist,
+            modifier = Modifier.padding(start = 8.dp),
             style = MaterialTheme.typography.bodySmall,
             color = palette.secondaryLabel,
             maxLines = 1,
@@ -402,9 +404,15 @@ private fun HomePlaylistCard(
             .hoverable(interactionSource)
             .hand()
             .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.size(156.dp).clip(RoundedCornerShape(12.dp))) {
-            PlaylistCover(playlist = playlist, size = 156.dp, modifier = Modifier.clip(RoundedCornerShape(12.dp)))
+            PlaylistCover(
+                playlist = playlist,
+                size = 156.dp,
+                modifier = Modifier.clip(RoundedCornerShape(12.dp)),
+                corner = 12.dp,
+            )
             if (hovered) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.16f)))
             }
@@ -426,15 +434,19 @@ private fun HomePlaylistCard(
         Spacer(Modifier.height(8.dp))
         Text(
             playlist.name,
+            modifier = Modifier.fillMaxWidth(),
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             if (playlist.isSystem) "系统歌单" else "${playlist.trackCount} 首歌曲",
+            modifier = Modifier.fillMaxWidth(),
             style = MaterialTheme.typography.bodySmall,
             color = palette.secondaryLabel,
+            textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -510,8 +522,7 @@ private fun HomeCompactTrackRow(
         Spacer(Modifier.width(8.dp))
         Text(
             formatMs(track.durationMs),
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
             color = palette.secondaryLabel,
         )
     }

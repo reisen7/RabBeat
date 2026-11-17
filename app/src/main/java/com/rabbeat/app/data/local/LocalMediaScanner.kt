@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
-import androidx.room.withTransaction
 import java.io.File
 import java.security.MessageDigest
 import com.rabbeat.app.data.local.entity.AlbumEntity
@@ -89,7 +88,7 @@ class LocalMediaScanner @Inject constructor(
         val rows = queryAll(filters, lyricIndex, reporter)
         val now = System.currentTimeMillis()
         checkActive()
-        val summary = database.withTransaction {
+        val summary = database.inTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(SOURCE_ID).associateBy { it.id }
             val otherEntities = trackDao.getOtherSources(SOURCE_ID)
@@ -171,8 +170,11 @@ class LocalMediaScanner @Inject constructor(
                     lastPlayedAt = listOfNotNull(preserved?.lastPlayedAt, losers.mapNotNull { it.lastPlayedAt }.maxOrNull()).maxOrNull(),
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.addedAt,
                     lyricUri = row.lyricUri ?: preserved?.lyricUri,
+                    lyricOffsetMs = preserved?.lyricOffsetMs ?: 0,
                     folder = row.folder,
                     hidden = (preserved?.hidden ?: false) || losers.any { it.hidden && sameFolder(it.folder, row.folder) },
+                    contentKey = preserved?.contentKey,
+                    syncId = preserved?.syncId,
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }

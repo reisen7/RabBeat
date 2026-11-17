@@ -1,6 +1,6 @@
 package com.rabbeat.app.data.local
 
-import androidx.room.withTransaction
+import android.content.Context
 import com.rabbeat.app.data.local.entity.AlbumEntity
 import com.rabbeat.app.data.local.entity.ArtistEntity
 import com.rabbeat.app.data.local.entity.PlaylistEntity
@@ -15,6 +15,10 @@ import com.rabbeat.app.data.remote.netease.NePrivilege
 import com.rabbeat.app.data.remote.netease.NeSong
 import com.rabbeat.app.domain.model.SourceStatus
 import com.rabbeat.app.domain.model.SourceType
+import com.rabbeat.app.playback.MediaCache
+import com.rabbeat.app.playback.NeteaseCacheStatus
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -32,9 +36,12 @@ class NeteaseNetworkException : Exception()
 
 @Singleton
 class NeteasePlaylistImporter @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val database: RabBeatDatabase,
+    private val mediaCache: MediaCache,
     private val api: NeteaseApi,
     private val reconciler: NeteaseReconciler,
+    private val orderClock: PlaylistOrderClock,
     private val logger: com.rabbeat.app.util.AppLogger,
 ) {
     suspend fun import(
@@ -82,7 +89,7 @@ class NeteasePlaylistImporter @Inject constructor(
         val now = System.currentTimeMillis()
         var finalName = detail.name
 
-        database.withTransaction {
+        database.inTransaction {
             val trackDao = database.trackDao()
             val sourceDao = database.sourceDao()
             val previous = sourceDao.get(NETEASE_SOURCE_ID)
@@ -128,7 +135,10 @@ class NeteasePlaylistImporter @Inject constructor(
                         addedAt = preserved.addedAt,
                         downloadState = preserved.downloadState,
                         lyricUri = preserved.lyricUri,
+                        lyricOffsetMs = preserved.lyricOffsetMs,
                         hidden = preserved.hidden,
+                        contentKey = preserved.contentKey,
+                        syncId = preserved.syncId,
                     )
                 } else {
                     entity
@@ -153,8 +163,10 @@ class NeteasePlaylistImporter @Inject constructor(
                     updatedAt = now,
                     sortOrder = old?.sortOrder ?: ((playlistDao.minSortOrder() ?: 0) - 1),
                     coverUri = old?.coverUri,
+                    syncId = old?.syncId,
                 ),
             )
+            if (old == null) orderClock.note()
             playlistDao.deleteTracks(playlistTableId)
             playlistDao.upsertTracks(
                 refs.distinct().mapIndexed { index, trackId ->
@@ -165,6 +177,35 @@ class NeteasePlaylistImporter @Inject constructor(
         reconciler.reconcile()
         logger.i("Netease", "import done '$finalName' imported=$imported matched=$matched skipped=$skipped")
         NeteaseImportResult(finalName, imported, matched, skipped)
+    }
+
+    /** Removes NetEase library rows. Songs already matched to local files stay. */
+    suspend fun clearImported(onRemoving: (Set<String>) -> Unit = {}): Int {
+        val tracks = database.trackDao().getBySource(NETEASE_SOURCE_ID)
+        if (tracks.isEmpty()) return 0
+        val ids = tracks.map { it.id }
+        onRemoving(ids.toSet())
+        withContext(Dispatchers.IO) {
+            database.inTransaction {
+                ids.chunked(400).forEach { chunk ->
+                    database.playlistDao().deleteRefs(chunk)
+                    database.lyricLinkDao().deleteForTracks(chunk)
+                    database.playHistoryDao().deleteForTracks(chunk)
+                }
+                database.trackDao().deleteBySource(NETEASE_SOURCE_ID)
+                database.albumDao().deleteBySource(NETEASE_SOURCE_ID)
+                database.artistDao().deleteBySource(NETEASE_SOURCE_ID)
+            }
+            tracks.forEach { track ->
+                File(context.cacheDir, "lyrics/${track.id}.lrc").delete()
+                File(context.filesDir, "lyrics/${track.id}.lrc").delete()
+                NeteaseCacheStatus.cacheKey(track.remoteId)?.let { key ->
+                    runCatching { mediaCache.cache.removeResource(key) }
+                }
+            }
+        }
+        logger.i("Netease", "cleared ${ids.size} imported tracks")
+        return ids.size
     }
 }
 

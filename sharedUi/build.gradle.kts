@@ -16,6 +16,9 @@ kotlin {
         namespace = "com.rabbeat.app.sharedui"
         compileSdk = 36
         minSdk = 26
+        // Off by default on a KMP library. Without it the compose string
+        // table never lands in the APK, and the mini player crashes on open.
+        androidResources.enable = true
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }

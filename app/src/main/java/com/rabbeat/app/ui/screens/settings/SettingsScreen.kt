@@ -37,11 +37,13 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -71,6 +73,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
+import com.rabbeat.app.sync.SyncQr
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -108,6 +113,7 @@ import com.rabbeat.app.data.local.dao.TrackDao
 import com.rabbeat.app.playback.MediaCache
 import com.rabbeat.app.playback.NeteaseCacheStatus
 import com.rabbeat.app.util.ScanProgress
+import com.rabbeat.app.data.local.clearScannedTracks
 import com.rabbeat.app.domain.model.MusicSource
 import com.rabbeat.app.domain.model.ScanSettings
 import com.rabbeat.app.domain.model.ThemeMode
@@ -172,8 +178,10 @@ class SettingsViewModel @Inject constructor(
     private val neteaseImporter: NeteasePlaylistImporter,
     private val mediaCache: MediaCache,
     private val cacheStatus: NeteaseCacheStatus,
+    private val database: com.rabbeat.app.data.local.RabBeatDatabase,
     private val logger: com.rabbeat.app.util.AppLogger,
     private val updateChecker: com.rabbeat.app.util.UpdateChecker,
+    private val deviceSync: com.rabbeat.app.data.local.DeviceSync,
 ) : ViewModel() {
     val page = combine(
         settings.themeMode,
@@ -265,6 +273,30 @@ class SettingsViewModel @Inject constructor(
     }
 
     val neteaseImport = MutableStateFlow<NeteaseImport>(NeteaseImport.Idle)
+    val syncState = MutableStateFlow(com.rabbeat.app.data.local.DeviceSyncState())
+    private var syncJob: Job? = null
+
+    fun startDeviceSync(hosts: List<String>, code: String) {
+        if (syncJob?.isActive == true) return
+        syncJob = viewModelScope.launch {
+            syncState.value = com.rabbeat.app.data.local.DeviceSyncState(running = true, message = "正在连接…")
+            try {
+                deviceSync.run(hosts, code) { message ->
+                    syncState.value = com.rabbeat.app.data.local.DeviceSyncState(running = true, message = message)
+                }
+                syncState.value = syncState.value.copy(running = false)
+            } catch (cancelled: CancellationException) {
+                syncState.value = com.rabbeat.app.data.local.DeviceSyncState(running = false, message = "已停止")
+                throw cancelled
+            } catch (error: Exception) {
+                syncState.value = com.rabbeat.app.data.local.DeviceSyncState(running = false, message = error.message ?: "同步失败")
+            }
+        }
+    }
+
+    fun cancelDeviceSync() {
+        syncJob?.cancel()
+    }
     val scan = MutableStateFlow<ScanTask?>(null)
     private var importJob: Job? = null
     val mediaCacheBytes = MutableStateFlow(0L)
@@ -293,6 +325,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun resetNeteaseImport() { neteaseImport.value = NeteaseImport.Idle }
+
+    fun clearScannedTracks(onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                runCatching { database.clearScannedTracks() }.getOrDefault(-1)
+            }
+            onDone(count)
+        }
+    }
 
     fun clearMediaCache() {
         viewModelScope.launch {
@@ -346,7 +387,10 @@ fun SettingsScreen(
     var restoreConfirm by remember { mutableStateOf(false) }
     var neteaseOpen by remember { mutableStateOf(false) }
     var cacheConfirm by remember { mutableStateOf(false) }
+    var clearScannedConfirm by remember { mutableStateOf(false) }
     var updateResult by remember { mutableStateOf<com.rabbeat.app.util.UpdateResult?>(null) }
+    var syncOpen by remember { mutableStateOf(false) }
+    val deviceSync by vm.syncState.collectAsStateWithLifecycle()
     var updateChecking by remember { mutableStateOf(false) }
     var allFilesPrompt by remember { mutableStateOf(false) }
     var waitingForAllFiles by remember { mutableStateOf(false) }
@@ -428,6 +472,7 @@ fun SettingsScreen(
                     mediaCacheBytes = mediaCacheBytes,
                     hiddenCount = hiddenCount,
                     onNeteaseImport = { neteaseOpen = true },
+                    onDeviceSync = { syncOpen = true },
                     onMediaCache = { cacheConfirm = true },
                     onAppearance = onAppearance,
                     onTheme = { themeOpen = true },
@@ -442,6 +487,7 @@ fun SettingsScreen(
                         }
                     },
                     onImportFolder = { folderLauncher.launch(null) },
+                    onClearScanned = { clearScannedConfirm = true },
                     onRescan = {
                         vm.rescanFolders { count ->
                             val message = when {
@@ -490,6 +536,63 @@ fun SettingsScreen(
             }
         }
         SnackbarHost(snack, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+
+    if (syncOpen) {
+        var scanNote by remember { mutableStateOf("") }
+        val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
+            val text = result.contents
+            if (text.isNullOrBlank()) return@rememberLauncherForActivityResult
+            val parsed = SyncQr.decode(text)
+            if (parsed == null) {
+                scanNote = context.getString(R.string.sync_bad_qr)
+            } else {
+                scanNote = ""
+                vm.startDeviceSync(parsed.hosts, parsed.code)
+            }
+        }
+        val scanPrompt = stringResource(R.string.sync_scan)
+        AlertDialog(
+            onDismissRequest = {
+                if (deviceSync.running) vm.cancelDeviceSync()
+                syncOpen = false
+            },
+            title = { Text(stringResource(R.string.sync_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.sync_body))
+                    val message = deviceSync.message.ifBlank { scanNote }
+                    if (message.isNotBlank()) {
+                        Text(message, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (deviceSync.running) {
+                            vm.cancelDeviceSync()
+                        } else {
+                            scanner.launch(
+                                ScanOptions().apply {
+                                    setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                    setPrompt(scanPrompt)
+                                    setBeepEnabled(false)
+                                    setOrientationLocked(true)
+                                },
+                            )
+                        }
+                    },
+                ) {
+                    Text(stringResource(if (deviceSync.running) R.string.sync_stop else R.string.sync_scan))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!deviceSync.running) syncOpen = false }, enabled = !deviceSync.running) {
+                    Text(stringResource(R.string.action_close))
+                }
+            },
+        )
     }
 
     val ready = (state as? ScreenState.Ready)?.value
@@ -650,6 +753,29 @@ fun SettingsScreen(
             },
         )
     }
+    if (clearScannedConfirm) {
+        AlertDialog(
+            onDismissRequest = { clearScannedConfirm = false },
+            title = { Text(stringResource(R.string.settings_clear_scanned_title)) },
+            text = { Text(stringResource(R.string.settings_clear_scanned_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    clearScannedConfirm = false
+                    vm.clearScannedTracks { count ->
+                        val message = if (count < 0) {
+                            context.getString(R.string.settings_clear_scanned_failed)
+                        } else {
+                            context.getString(R.string.settings_clear_scanned_done, count)
+                        }
+                        scope.launch { snack.showSnackbar(message) }
+                    }
+                }) { Text(stringResource(R.string.settings_clear_scanned_action)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearScannedConfirm = false }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+    }
     if (cacheConfirm) {
         AlertDialog(
             onDismissRequest = { cacheConfirm = false },
@@ -738,6 +864,7 @@ private fun SettingsBody(
     mediaCacheBytes: Long,
     hiddenCount: Int,
     onNeteaseImport: () -> Unit,
+    onDeviceSync: () -> Unit,
     onMediaCache: () -> Unit,
     onAppearance: () -> Unit,
     onTheme: () -> Unit,
@@ -747,6 +874,7 @@ private fun SettingsBody(
     onScan: () -> Unit,
     onImportFolder: () -> Unit,
     onRescan: () -> Unit,
+    onClearScanned: () -> Unit,
     onBackup: () -> Unit,
     onRestore: () -> Unit,
     onExportLogs: () -> Unit,
@@ -833,6 +961,14 @@ private fun SettingsBody(
         GroupHeader(stringResource(R.string.library_tracks))
         GlassGroup(Modifier.padding(horizontal = 16.dp)) {
             SettingRow(
+                icon = Icons.Filled.Sync,
+                iconColor = androidx.compose.ui.graphics.Color(0xFF34C759),
+                title = stringResource(R.string.settings_device_sync),
+                subtitle = stringResource(R.string.settings_device_sync_body),
+                onClick = onDeviceSync,
+            )
+            GroupDivider()
+            SettingRow(
                 icon = Icons.Filled.LibraryMusic,
                     iconColor = androidx.compose.ui.graphics.Color(0xFFFF3B30),
                 title = stringResource(R.string.settings_scan_device),
@@ -854,6 +990,14 @@ private fun SettingsBody(
                 title = stringResource(R.string.settings_rescan_folders),
                 subtitle = stringResource(R.string.settings_rescan_body),
                 onClick = onRescan,
+            )
+            GroupDivider()
+            SettingRow(
+                icon = Icons.Filled.DeleteSweep,
+                iconColor = androidx.compose.ui.graphics.Color(0xFFFF3B30),
+                title = stringResource(R.string.settings_clear_scanned),
+                subtitle = stringResource(R.string.settings_clear_scanned_body),
+                onClick = onClearScanned,
             )
             GroupDivider()
             SettingRow(

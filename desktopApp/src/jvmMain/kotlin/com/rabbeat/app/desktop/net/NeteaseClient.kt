@@ -8,6 +8,8 @@ import com.rabbeat.app.data.remote.netease.NeLyricResponse
 import com.rabbeat.app.data.remote.netease.NePlaylist
 import com.rabbeat.app.data.remote.netease.NePlaylistResponse
 import com.rabbeat.app.data.remote.netease.NeSongDetailResponse
+import com.rabbeat.app.data.remote.netease.NETEASE_SOURCE_ID
+import com.rabbeat.app.data.remote.netease.NeteaseLyrics
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
@@ -62,13 +64,22 @@ object NeteaseClient {
         }.getOrNull()
     }
 
-    /** Search `title artist` → top song id → raw .lrc text (or null). */
-    suspend fun fetchLrc(title: String, artist: String): String? = withContext(Dispatchers.IO) {
-        val songId = searchSongId("$title $artist") ?: searchSongId(title) ?: return@withContext null
-        lyric(songId)?.let {
-            com.rabbeat.app.data.remote.netease.NeteaseLyrics.merge(it.lrc?.lyric, it.tlyric?.lyric)
-        }
+    /** Known NetEase song id on an imported row, otherwise null. */
+    fun songIdOf(trackId: String, sourceId: String, remoteId: String?): Long? =
+        remoteId?.toLongOrNull()?.takeIf { sourceId == NETEASE_SOURCE_ID || trackId.startsWith("ne_") }
+
+    /**
+     * Lyrics for a track. Imported NetEase songs use their own song id;
+     * everything else is a title/artist search. Returns merged .lrc text, or null.
+     */
+    suspend fun fetchLrc(title: String, artist: String, songId: Long? = null): String? = withContext(Dispatchers.IO) {
+        if (songId != null) merged(songId)?.let { return@withContext it }
+        val found = searchSongId("$title $artist") ?: searchSongId(title) ?: return@withContext null
+        merged(found)
     }
+
+    private suspend fun merged(songId: Long): String? =
+        lyric(songId)?.let { NeteaseLyrics.merge(it.lrc?.lyric, it.tlyric?.lyric) }
 
     private suspend fun searchSongId(keyword: String): Long? {
         val q = URLEncoder.encode(keyword, Charsets.UTF_8)

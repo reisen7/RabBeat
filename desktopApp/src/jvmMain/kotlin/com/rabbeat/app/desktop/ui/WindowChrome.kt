@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CropSquare
@@ -37,12 +36,12 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowScope
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import java.awt.Cursor
+import java.awt.Frame
 import java.awt.MouseInfo
 import java.awt.Point
 import java.awt.Rectangle
@@ -60,45 +59,50 @@ fun DragRegion(modifier: Modifier = Modifier) {
         Box(modifier)
         return
     }
-    with(scope) {
-        WindowDraggableArea(modifier) {
-            if (toggle != null) {
-                Box(
-                    Modifier.fillMaxSize().pointerInput(toggle) {
-                        awaitDoubleTaps { toggle() }
-                    },
-                )
+    val window = scope.window
+    Box(
+        modifier.pointerInput(window, toggle) {
+            var lastTapAt = 0L
+            var lastTapPos = Offset.Zero
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val downPos = down.position
+                var dragged = false
+                var originWindow: Point? = null
+                var originPointer: Point? = null
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    val maximized = window is Frame && window.extendedState and Frame.MAXIMIZED_BOTH != 0
+                    if (!dragged && !maximized &&
+                        (change.position - downPos).getDistance() > viewConfiguration.touchSlop
+                    ) {
+                        dragged = true
+                        originWindow = Point(window.x, window.y)
+                        originPointer = MouseInfo.getPointerInfo()?.location?.let { Point(it) }
+                    }
+                    if (dragged) {
+                        change.consume()
+                        val originW = originWindow ?: continue
+                        val originP = originPointer ?: continue
+                        val now = MouseInfo.getPointerInfo()?.location ?: continue
+                        window.setLocation(originW.x + now.x - originP.x, originW.y + now.y - originP.y)
+                    }
+                }
+                if (!dragged && toggle != null) {
+                    val at = down.uptimeMillis
+                    if (at - lastTapAt < 480L && (down.position - lastTapPos).getDistance() < 48f) {
+                        lastTapAt = 0L
+                        toggle()
+                    } else {
+                        lastTapAt = at
+                        lastTapPos = down.position
+                    }
+                }
             }
-        }
-    }
-}
-
-private suspend fun PointerInputScope.awaitDoubleTaps(onDoubleTap: () -> Unit) {
-    var lastTapAt = 0L
-    var lastTapPos = Offset.Zero
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
-        var dragged = false
-        while (true) {
-            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-            if (change.positionChanged() &&
-                (change.position - down.position).getDistance() > viewConfiguration.touchSlop
-            ) {
-                dragged = true
-            }
-            if (!change.pressed) break
-        }
-        if (!dragged) {
-            val at = down.uptimeMillis
-            if (at - lastTapAt < 480L && (down.position - lastTapPos).getDistance() < 48f) {
-                lastTapAt = 0L
-                onDoubleTap()
-            } else {
-                lastTapAt = at
-                lastTapPos = down.position
-            }
-        }
-    }
+        },
+    )
 }
 
 /** Windows-style caption buttons: minimize, maximize/restore, close. */

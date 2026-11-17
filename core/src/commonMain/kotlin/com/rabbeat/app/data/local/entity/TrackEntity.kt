@@ -45,4 +45,8 @@ data class TrackEntity(
     @ColumnInfo(defaultValue = "0") val lyricOffsetMs: Long = 0,
     val folder: String? = null,
     @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
+    /** Size plus a hash of the head and tail, or `ne:<songId>` for NetEase. Shared across devices. */
+    val contentKey: String? = null,
+    /** Stable id used by playlists and likes. Local playback ids stay on the device. */
+    val syncId: String? = null,
 )

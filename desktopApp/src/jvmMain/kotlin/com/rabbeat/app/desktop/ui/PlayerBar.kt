@@ -5,6 +5,9 @@ import com.rabbeat.app.desktop.playlist.*
 import com.rabbeat.app.desktop.net.*
 import com.rabbeat.app.desktop.sys.*
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -50,6 +53,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,8 +67,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.onPointerEvent
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rabbeat.app.data.local.LikedPlaylist
@@ -96,12 +100,37 @@ fun PlayerBar(
     val volume by player.volume.collectAsState()
     val muted by player.muted.collectAsState()
     val loading by player.loading.collectAsState()
+    // Brief loads (<250ms, e.g. local seek) shouldn't flash the play button into a spinner.
+    var showSpinner by remember { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (loading) {
+            kotlinx.coroutines.delay(250)
+            showSpinner = true
+        } else {
+            showSpinner = false
+        }
+    }
     var previewMs by remember(track?.id) { mutableStateOf<Long?>(null) }
     var sleepMenu by remember { mutableStateOf(false) }
     val shownPosition = previewMs ?: state.positionMs
 
-    Column(Modifier.fillMaxWidth().height(80.dp).background(translucentSurface())) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)))
+    // Fade the bar's own backdrop out as the full-height NowPlayingPage slides in beneath it,
+    // so both share one continuous backdrop with zero seam or color pop.
+    val bgAlpha by animateFloatAsState(
+        targetValue = if (nowPlayingOpen) 0f else 1f,
+        animationSpec = tween(280, easing = FastOutSlowInEasing),
+    )
+    Box(Modifier.fillMaxWidth().height(80.dp)) {
+        if (bgAlpha > 0.01f) {
+            Box(Modifier.fillMaxSize().alpha(bgAlpha).background(translucentSurface()))
+        }
+        Column(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f * bgAlpha.coerceAtLeast(0.75f))),
+        )
         Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             // Left: artwork + title/artist + like
             Row(Modifier.weight(1f).widthIn(min = 280.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -196,7 +225,7 @@ fun PlayerBar(
                             .clickable(enabled = hasTrack) { player.toggle() },
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (loading) {
+                        if (showSpinner) {
                             CircularProgressIndicator(
                                 color = accent.onColor,
                                 strokeWidth = 2.dp,
@@ -230,9 +259,12 @@ fun PlayerBar(
                 ) {
                     Text(
                         formatMs(shownPosition),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.widthIn(min = 38.dp),
                     )
                     SeekBar(
                         fraction = if (state.durationMs > 0) (shownPosition.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f,
@@ -249,9 +281,12 @@ fun PlayerBar(
                     )
                     Text(
                         formatMs(state.durationMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.widthIn(min = 38.dp),
                     )
                 }
             }
@@ -325,25 +360,16 @@ fun PlayerBar(
                     )
                 }
                 Spacer(Modifier.width(4.dp))
-                Box {
-                    IconButton(onClick = onToggleQueue, modifier = Modifier.size(36.dp).hand()) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = "播放队列",
-                            tint = if (queueOpen) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    if (state.queue.isNotEmpty()) {
-                        Text(
-                            "${state.queue.size}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = accent.color,
-                            modifier = Modifier.align(Alignment.TopEnd).padding(top = 1.dp, end = 1.dp),
-                        )
-                    }
+                IconButton(onClick = onToggleQueue, modifier = Modifier.size(36.dp).hand()) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.QueueMusic,
+                        contentDescription = "播放队列",
+                        tint = if (queueOpen) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
                 }
             }
+        }
         }
     }
 }

@@ -15,17 +15,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.rabbeat.app.domain.model.UserPlaylist
-import com.rabbeat.app.ui.theme.LocalAccentPalette
+import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 
 @Composable
-fun PlaylistCover(playlist: UserPlaylist, size: Dp, modifier: Modifier = Modifier) {
-    val accent = LocalAccentPalette.current
+fun PlaylistCover(
+    playlist: UserPlaylist,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    corner: Dp = 8.dp,
+) {
+    val palette = LocalRabBeatPalette.current
     val density = LocalDensity.current
     val cover = playlist.displayCoverUri
     if (cover != null) {
@@ -35,38 +38,30 @@ fun PlaylistCover(playlist: UserPlaylist, size: Dp, modifier: Modifier = Modifie
     Box(
         modifier
             .size(size)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                Brush.linearGradient(
-                    if (playlist.isSystem) {
-                        listOf(Color(0xFFFF5E8A), Color(0xFFD4237A))
-                    } else {
-                        listOf(accent.color.copy(alpha = 0.62f), accent.color.copy(alpha = 0.28f))
-                    },
-                ),
-            ),
+            .clip(RoundedCornerShape(corner))
+            .background(palette.coverFill),
     ) {
         if (playlist.isSystem) {
             Icon(
                 Icons.Filled.Favorite,
                 contentDescription = null,
-                tint = Color.White,
+                tint = palette.coverGlyph,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(size * 0.35f),
+                    .size(size * 0.38f),
             )
         } else {
             Text(
                 playlist.name.take(1),
                 style = MaterialTheme.typography.displaySmall,
                 fontSize = with(density) { (size * 0.3f).toSp() },
-                color = Color.White.copy(alpha = 0.92f),
+                color = palette.coverGlyph,
                 modifier = Modifier.align(Alignment.Center),
             )
             Icon(
                 Icons.AutoMirrored.Filled.PlaylistPlay,
                 contentDescription = null,
-                tint = Color.White.copy(alpha = 0.75f),
+                tint = palette.coverGlyph,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(size * 0.08f)

@@ -20,8 +20,18 @@ interface PlayHistoryDao {
     @Query("DELETE FROM play_history")
     suspend fun clear()
 
+    @Query("DELETE FROM play_history WHERE trackId IN (:ids)")
+    suspend fun deleteForTracks(ids: List<String>)
+
     @Query("DELETE FROM play_history WHERE trackId LIKE 'trk\\_%' ESCAPE '\\'")
     suspend fun deleteDemo()
+
+    @Query(
+        "DELETE FROM play_history WHERE trackId IN (" +
+            "SELECT id FROM tracks WHERE (sourceId = 'dsk_local' AND IFNULL(folder, '') != '来自手机') " +
+            "OR sourceId = 'src_device' OR sourceId LIKE 'fld\\_%' ESCAPE '\\')",
+    )
+    suspend fun deleteScanned()
 
     @Query("SELECT * FROM play_history ORDER BY playedAt DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<PlayHistoryEntity>>

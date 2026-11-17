@@ -148,6 +148,7 @@
     <string name="action_save">保存</string>
     <string name="action_ok">好</string>
     <string name="action_cancel">取消</string>
+    <string name="action_close">关闭</string>
     <string name="action_remove">移除</string>
 
     <string name="downloads_title">离线下载</string>
@@ -162,6 +163,14 @@
     <string name="downloads_cellular_cache_hint">关闭后，在线歌曲（网易云导入）在移动网络下不拉流不缓存</string>
     <string name="downloads_clear">清除已完成记录</string>
     <string name="downloads_cleared">已完成的记录清掉了</string>
+    <string name="downloads_clear_sync">清除从电脑同步的歌曲</string>
+    <string name="downloads_clear_sync_body">删掉这些歌曲和音频文件，方便改用本机高品质文件</string>
+    <string name="downloads_clear_sync_title">清除从电脑同步的歌曲</string>
+    <string name="downloads_clear_sync_confirm">将删除从电脑同步到这台手机的歌曲和音频文件。网易云歌单还在。扫入高品质文件后重新导入歌单，对得上的歌会改用本地文件。</string>
+    <string name="downloads_clear_sync_action">清除</string>
+    <string name="downloads_clear_sync_done">已清除 %1$d 首</string>
+    <string name="downloads_clear_sync_empty">没有从电脑同步的歌曲</string>
+    <string name="downloads_clear_sync_failed">清除失败</string>
 
     <string name="settings_sources">来源</string>
     <string name="settings_subtitle">让RabBeat更顺手</string>
@@ -183,6 +192,13 @@
     <string name="scan_edit_seconds">秒</string>
     <string name="settings_folder_body">从文件管理器选择一个文件夹导入</string>
     <string name="settings_rescan_body">重新读取之前导入过的文件夹</string>
+    <string name="settings_clear_scanned">清空已扫描歌曲</string>
+    <string name="settings_clear_scanned_body">清除扫描进曲库的记录，不删除文件</string>
+    <string name="settings_clear_scanned_title">清空已扫描歌曲</string>
+    <string name="settings_clear_scanned_confirm">将清除「扫描本机音乐」和「从文件夹导入」写入曲库的全部记录。手机里的歌曲文件会保留，网易云导入的歌曲不受影响。确定继续吗？</string>
+    <string name="settings_clear_scanned_action">清空</string>
+    <string name="settings_clear_scanned_done">已清除 %1$d 首扫描记录</string>
+    <string name="settings_clear_scanned_failed">清除失败</string>
     <string name="settings_netease_import">导入网易云歌单</string>
     <string name="settings_netease_import_body">粘贴歌单分享链接</string>
     <string name="netease_import_hint">歌单链接或 ID</string>
@@ -195,6 +211,14 @@
     <string name="settings_media_cache">在线歌曲缓存</string>
     <string name="media_cache_clear_title">清除缓存</string>
     <string name="media_cache_clear_body">已缓存的在线歌曲会被删除</string>
+    <string name="settings_device_sync">和电脑同步</string>
+    <string name="settings_device_sync_body">同一 Wi-Fi。歌单里缺的歌会带上音频、封面和歌词</string>
+    <string name="sync_title">和电脑同步歌单</string>
+    <string name="sync_body">电脑设置里打开同步，扫屏幕上的二维码。同步的是歌单。歌单里这边没有的歌，会把音频、封面和歌词一起拿过来。</string>
+    <string name="sync_scan">扫描二维码</string>
+    <string name="sync_bad_qr">这不是同步二维码</string>
+    <string name="sync_start">开始同步</string>
+    <string name="sync_stop">停止</string>
     <string name="settings_backup_body">导出歌单和播放记录</string>
     <string name="settings_restore_short">从 JSON 备份恢复</string>
     <string name="settings_downloads_body">离线任务与下载偏好</string>
@@ -256,6 +280,11 @@
     <string name="hidden_restore_all">全部恢复</string>
     <string name="hidden_track_subtitle">%1$d 首</string>
     <string name="menu_hide_folder">隐藏这个文件夹</string>
+    <string name="menu_delete_netease_folder">删除</string>
+    <string name="delete_netease_folder_title">删除网易云音乐</string>
+    <string name="delete_netease_folder_body">将从曲库移除这个文件夹里的网易云歌曲，并从歌单里拿掉。已经匹配到本地文件的歌会留下来。手机里的音乐文件不删。</string>
+    <string name="delete_netease_folder_done">已清除 %1$d 首网易云歌曲</string>
+    <string name="delete_netease_folder_empty">没有网易云导入的歌曲</string>
     <string name="hide_folder_dialog_title">隐藏这个文件夹？</string>
     <string name="hide_folder_dialog_body">「%1$s」里的 %2$d 首歌（含子文件夹）会从曲库、歌单和搜索中消失，本机文件不会被删除，可以在「设置 → 已隐藏的歌曲」里恢复</string>
     <string name="playlist_add">添加到歌单</string>
@@ -298,7 +327,7 @@
     <string name="playlist_cover_change">更换封面</string>
     <string name="playlist_cover_reset">恢复默认封面</string>
     <string name="playlist_cover_custom">自定义封面</string>
-    <string name="playlist_cover_auto">使用最新添加歌曲的封面</string>
+    <string name="playlist_cover_auto">使用第一首歌曲的封面</string>
     <string name="playlist_cover_set">点按设置封面</string>
     <string name="playlist_sort_artist">按歌手</string>
     <string name="playlist_sort_album">按专辑</string>

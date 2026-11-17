@@ -39,11 +39,23 @@ interface AlbumDao {
     @Query("SELECT COUNT(*) FROM albums")
     suspend fun count(): Int
 
+    @Query("SELECT * FROM albums")
+    suspend fun getAll(): List<AlbumEntity>
+
+    @Query("SELECT * FROM albums WHERE id = :id")
+    suspend fun get(id: String): AlbumEntity?
+
+    @Query("UPDATE albums SET artworkUri = :uri WHERE id = :id")
+    suspend fun updateArtworkUri(id: String, uri: String?)
+
     @Upsert
     suspend fun upsertAll(albums: List<AlbumEntity>)
 
     @Query("DELETE FROM albums WHERE sourceId = :sourceId")
     suspend fun deleteBySource(sourceId: String)
+
+    @Query("DELETE FROM albums WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.albumId = albums.id)")
+    suspend fun deleteOrphans()
 
     @Query("DELETE FROM albums WHERE sourceId = 'src_local' OR id IN ('alb_night', 'alb_city', 'alb_freq')")
     suspend fun deleteDemo()
@@ -73,11 +85,20 @@ interface ArtistDao {
     @Query("$ARTIST_VISIBLE_SQL AND a.name LIKE '%' || :q || '%' ORDER BY a.name COLLATE NOCASE")
     fun search(q: String): Flow<List<ArtistEntity>>
 
+    @Query("SELECT * FROM artists")
+    suspend fun getAll(): List<ArtistEntity>
+
+    @Query("UPDATE artists SET artworkUri = :uri WHERE id = :id")
+    suspend fun updateArtworkUri(id: String, uri: String?)
+
     @Upsert
     suspend fun upsertAll(artists: List<ArtistEntity>)
 
     @Query("DELETE FROM artists WHERE sourceId = :sourceId")
     suspend fun deleteBySource(sourceId: String)
+
+    @Query("DELETE FROM artists WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artistId = artists.id)")
+    suspend fun deleteOrphans()
 
     @Query("DELETE FROM artists WHERE sourceId = 'src_local' OR id IN ('art_lin', 'art_beidao')")
     suspend fun deleteDemo()
@@ -121,6 +142,12 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun get(id: String): PlaylistEntity?
 
+    @Query("SELECT * FROM playlists WHERE syncId = :syncId LIMIT 1")
+    suspend fun bySyncId(syncId: String): PlaylistEntity?
+
+    @Query("UPDATE playlists SET syncId = :syncId WHERE id = :id")
+    suspend fun setSyncId(id: String, syncId: String)
+
     @Query(
         "SELECT pt.playlistId AS playlistId, COUNT(*) AS trackCount FROM playlist_tracks pt " +
             "JOIN tracks t ON t.id = pt.trackId AND t.hidden = 0 GROUP BY pt.playlistId",
@@ -133,7 +160,10 @@ interface PlaylistDao {
         "SELECT p.id AS playlistId, (" +
             "SELECT t.artworkUri FROM playlist_tracks pt JOIN tracks t ON t.id = pt.trackId " +
             "WHERE pt.playlistId = p.id AND t.hidden = 0 AND t.artworkUri IS NOT NULL AND t.artworkUri != '' " +
-            "ORDER BY pt.addedAt DESC, pt.position DESC LIMIT 1) AS artworkUri FROM playlists p",
+            "AND pt.position = (" +
+            "SELECT MIN(pt2.position) FROM playlist_tracks pt2 JOIN tracks t2 ON t2.id = pt2.trackId " +
+            "WHERE pt2.playlistId = p.id AND t2.hidden = 0 AND t2.artworkUri IS NOT NULL AND t2.artworkUri != ''" +
+            ") LIMIT 1) AS artworkUri FROM playlists p",
     )
     fun observeLatestArtwork(): Flow<List<PlaylistLatestArtwork>>
 
@@ -183,6 +213,16 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun deleteTracks(playlistId: String)
+
+    @Query(
+        "DELETE FROM playlist_tracks WHERE trackId IN (" +
+            "SELECT id FROM tracks WHERE (sourceId = 'dsk_local' AND IFNULL(folder, '') != '来自手机') " +
+            "OR sourceId = 'src_device' OR sourceId LIKE 'fld\\_%' ESCAPE '\\')",
+    )
+    suspend fun deleteScannedRefs()
+
+    @Query("DELETE FROM playlist_tracks WHERE trackId IN (:ids)")
+    suspend fun deleteRefs(ids: List<String>)
 
     @Query("DELETE FROM playlist_tracks WHERE trackId LIKE 'trk\\_%' ESCAPE '\\'")
     suspend fun deleteDemoTracks()

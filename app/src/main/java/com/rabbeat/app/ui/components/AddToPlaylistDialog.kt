@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -87,8 +86,6 @@ class AddToPlaylistViewModel @Inject constructor(
         }
     }
 }
-
-private val LikedTileGradient = listOf(Color(0xFFFF5E8A), Color(0xFFD4237A))
 
 private val TileGradients = listOf(
     listOf(Color(0xFFFF5E8A), Color(0xFFD4237A)),
@@ -229,20 +226,12 @@ fun AddToPlaylistDialog(
                             onClick = { creating = true },
                         )
                     }
-                    val normalSheets = sheets.filter { !it.isSystem }
                     items(sheets, key = { it.id }) { sheet ->
                         SheetRow(
                             title = sheet.name,
                             subtitle = stringResource(R.string.playlist_count, sheet.trackCount),
                             titleColor = palette.label,
-                            leading = {
-                                if (sheet.isSystem) {
-                                    PlaylistTile(Icons.Filled.Favorite, LikedTileGradient)
-                                } else {
-                                    val index = normalSheets.indexOf(sheet)
-                                    PlaylistTile(Icons.AutoMirrored.Filled.QueueMusic, TileGradients[index % TileGradients.size])
-                                }
-                            },
+                            leading = { PlaylistCover(sheet, 52.dp) },
                             showDivider = sheets.indexOf(sheet) != sheets.lastIndex,
                             onClick = { vm.add(sheet.id, trackIds) { count -> added(sheet.name, count) } },
                         )

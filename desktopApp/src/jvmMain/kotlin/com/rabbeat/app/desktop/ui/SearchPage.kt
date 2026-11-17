@@ -296,7 +296,7 @@ fun SearchPage(
                             }
                             VerticalScrollbar(
                                 adapter = rememberScrollbarAdapter(gridState),
-                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
                             )
                         }
                     }
@@ -327,7 +327,7 @@ fun SearchPage(
                             }
                             VerticalScrollbar(
                                 adapter = rememberScrollbarAdapter(gridState),
-                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
                             )
                         }
                     }
@@ -365,7 +365,7 @@ fun SearchPage(
                             }
                             VerticalScrollbar(
                                 adapter = rememberScrollbarAdapter(gridState),
-                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
                             )
                         }
                     }

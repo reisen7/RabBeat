@@ -21,10 +21,14 @@ object DesktopLog {
     fun w(tag: String, msg: String) = write("W", tag, msg)
     fun e(tag: String, msg: String) = write("E", tag, msg)
 
+    private val lock = Any()
+
     private fun write(level: String, tag: String, msg: String) {
-        runCatching {
-            File(dir, "${day.format(Date())}.log")
-                .appendText("${time.format(Date())} $level/$tag $msg\n", Charsets.UTF_8)
+        val line = "${time.format(Date())} $level/$tag $msg\n"
+        synchronized(lock) {
+            runCatching {
+                File(dir, "${day.format(Date())}.log").appendText(line, Charsets.UTF_8)
+            }
         }
     }
 

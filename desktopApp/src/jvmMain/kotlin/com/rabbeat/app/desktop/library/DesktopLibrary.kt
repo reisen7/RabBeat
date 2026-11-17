@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
@@ -45,11 +44,15 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,6 +72,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rabbeat.app.data.local.RabBeatDatabase
+import com.rabbeat.app.data.remote.netease.NeteaseMapper
+import com.rabbeat.app.desktop.net.NeteaseImporter
+import com.rabbeat.app.desktop.player.DesktopPlayerController
+import com.rabbeat.app.desktop.sys.DesktopSettings
 import com.rabbeat.app.data.local.entity.AlbumEntity
 import com.rabbeat.app.data.local.entity.ArtistEntity
 import com.rabbeat.app.data.local.entity.TrackEntity
@@ -272,6 +279,7 @@ fun DesktopLibrary(
                 )
                 else -> FolderList(
                     db = db,
+                    player = player,
                     folders = folders,
                     tracks = tracks,
                     onOpen = { folder -> onOpenFolder(folder.path) },
@@ -383,7 +391,7 @@ private fun AlbumGrid(
         }
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(gridState),
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
         )
     }
 }
@@ -463,7 +471,7 @@ private fun ArtistGrid(
         }
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(gridState),
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
         )
     }
 }
@@ -471,6 +479,7 @@ private fun ArtistGrid(
 @Composable
 private fun FolderList(
     db: RabBeatDatabase,
+    player: PlaybackController,
     folders: List<FolderSummary>,
     tracks: List<TrackEntity>,
     onOpen: (FolderSummary) -> Unit,
@@ -485,6 +494,7 @@ private fun FolderList(
     val listState = rememberLazyListState()
     val accent = LocalAccentPalette.current
     val palette = LocalRabBeatPalette.current
+    var confirmNetease by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -496,18 +506,23 @@ private fun FolderList(
             items(folders, key = { it.path }) { folder ->
                 val interactionSource = remember { MutableInteractionSource() }
                 val hovered by interactionSource.collectIsHoveredAsState()
-                ContextMenuArea(
+                ThemedContextMenuArea(
                     items = {
-                        listOf(
-                            ContextMenuItem("隐藏此文件夹") {
-                                scope.launch {
-                                    val ids = tracks
-                                        .filter { it.folderPath == folder.path.ifBlank { "本地" } }
-                                        .map { it.id }
-                                    if (ids.isNotEmpty()) db.trackDao().setHidden(ids, true)
-                                }
-                            },
-                        )
+                        buildList {
+                            add(
+                                ContextMenuItem("隐藏此文件夹") {
+                                    scope.launch {
+                                        val ids = tracks
+                                            .filter { it.folderPath == folder.path.ifBlank { "本地" } }
+                                            .map { it.id }
+                                        if (ids.isNotEmpty()) db.trackDao().setHidden(ids, true)
+                                    }
+                                },
+                            )
+                            if (folder.path == NeteaseMapper.FOLDER) {
+                                add(ContextMenuItem("删除") { confirmNetease = true })
+                            }
+                        }
                     },
                 ) {
                     Row(
@@ -571,7 +586,42 @@ private fun FolderList(
         }
         VerticalScrollbar(
             adapter = rememberScrollbarAdapter(listState),
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
+        )
+    }
+    if (confirmNetease) {
+        AlertDialog(
+            onDismissRequest = { confirmNetease = false },
+            title = { Text("删除网易云音乐", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Text(
+                    "将从曲库移除这个文件夹里的网易云歌曲，并从歌单里拿掉。已经匹配到本地文件的歌会留下来。硬盘上的音乐文件不删。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                Button(
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = accent.color,
+                        contentColor = accent.onColor,
+                    ),
+                    modifier = Modifier.hand(),
+                    onClick = {
+                        confirmNetease = false
+                        scope.launch {
+                            val settings = DesktopSettings()
+                            NeteaseImporter(db).clearImported(
+                                cacheRoot = settings.cacheRoot(),
+                                lyricRoot = settings.lyricRoot(),
+                                onRemoving = { ids -> (player as? DesktopPlayerController)?.dropTracks(ids) },
+                            )
+                        }
+                    },
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmNetease = false }, modifier = Modifier.hand()) { Text("取消") }
+            },
         )
     }
 }

@@ -28,6 +28,8 @@ data class RabBeatPalette(
     val secondaryLabel: Color,
     val tertiaryLabel: Color,
     val bar: Color,
+    val coverFill: Color,
+    val coverGlyph: Color,
 )
 
 val DarkRabBeatPalette = RabBeatPalette(
@@ -42,6 +44,8 @@ val DarkRabBeatPalette = RabBeatPalette(
     secondaryLabel = Color(0x99EBEBF5),
     tertiaryLabel = Color(0x4DEBEBF5),
     bar = Color(0xF0161616),
+    coverFill = Color(0x3D767680),
+    coverGlyph = Color(0x99EBEBF5),
 )
 
 val LightRabBeatPalette = RabBeatPalette(
@@ -56,6 +60,8 @@ val LightRabBeatPalette = RabBeatPalette(
     secondaryLabel = Color(0x993C3C43),
     tertiaryLabel = Color(0x4D3C3C43),
     bar = Color(0xF0F9F9F9),
+    coverFill = Color(0xFFD1D1D6),
+    coverGlyph = Color(0xFF636366),
 )
 
 /** Accent data for a user selectable highlight colour. */

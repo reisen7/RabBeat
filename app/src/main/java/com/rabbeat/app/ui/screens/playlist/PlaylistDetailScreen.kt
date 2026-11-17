@@ -5,7 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,16 +53,32 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -89,7 +109,6 @@ import com.rabbeat.app.ui.components.GlassPill
 import com.rabbeat.app.ui.components.HeaderIconButton
 import com.rabbeat.app.ui.components.LocateButton
 import com.rabbeat.app.ui.components.PlaylistCover
-import com.rabbeat.app.ui.components.ScreenHeader
 import com.rabbeat.app.ui.components.SelectionCheck
 import com.rabbeat.app.ui.components.TrackRow
 import com.rabbeat.app.ui.screens.appearance.BackgroundCropper
@@ -101,8 +120,13 @@ import javax.inject.Inject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import android.widget.Toast
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -222,6 +246,39 @@ fun PlaylistDetailScreen(
     var local by remember { mutableStateOf<List<Track>?>(null) }
     var dragging by remember { mutableStateOf(false) }
     val canDrag = sort == PlaylistSort.Order && query.isBlank() && !selecting
+    val headerOffset = remember { mutableFloatStateOf(0f) }
+    val headerHeight = remember { mutableIntStateOf(0) }
+    val selectingNow = rememberUpdatedState(selecting)
+    val draggingNow = rememberUpdatedState(dragging)
+    val headerScroll = remember(scope) {
+        PlaylistHeaderScroll(
+            scope = scope,
+            offset = headerOffset,
+            height = headerHeight,
+            selecting = selectingNow,
+            dragging = draggingNow,
+            atTop = { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 },
+        )
+    }
+    LaunchedEffect(listState, selecting) {
+        if (selecting) {
+            headerScroll.jump(0f)
+            return@LaunchedEffect
+        }
+        var away = false
+        snapshotFlow {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        }.distinctUntilChanged().collect { atTop ->
+            val height = headerHeight.intValue.toFloat()
+            if (!atTop) {
+                away = true
+                if (height > 0f) headerScroll.settle(-height)
+            } else if (away) {
+                away = false
+                headerScroll.settle(0f)
+            }
+        }
+    }
     val exitSelection = {
         selecting = false
         selected = emptySet()
@@ -278,71 +335,68 @@ fun PlaylistDetailScreen(
         local = list
     }
 
-    Column(Modifier.fillMaxSize()) {
-        ScreenHeader(
-            title = page.playlist?.name ?: stringResource(R.string.playlist_missing),
-            subtitle = if (selecting) {
-                stringResource(R.string.selected_count, selected.size)
+    Column(Modifier.fillMaxSize().nestedScroll(headerScroll)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selecting) {
+                TextButton(onClick = { exitSelection() }) {
+                    Text(stringResource(R.string.action_cancel), color = accent.color)
+                }
             } else {
-                stringResource(R.string.smart_count, page.tracks.size)
-            },
-            leading = {
-                if (selecting) {
-                    TextButton(onClick = { exitSelection() }) {
-                        Text(stringResource(R.string.action_cancel), color = accent.color)
-                    }
-                } else {
-                    HeaderIconButton(
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.action_back),
-                        onClick = onBack,
+                HeaderIconButton(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.action_back),
+                    onClick = onBack,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (selecting) {
+                val allShown = shown.map { it.id }.toSet()
+                val allSelected = allShown.isNotEmpty() && selected.containsAll(allShown)
+                TextButton(onClick = {
+                    selected = if (allSelected) emptySet() else allShown
+                }) {
+                    Text(
+                        stringResource(if (allSelected) R.string.action_deselect_all else R.string.action_select_all),
+                        color = accent.color,
                     )
                 }
-            },
-            trailing = {
-                if (selecting) {
-                    val allShown = shown.map { it.id }.toSet()
-                    val allSelected = allShown.isNotEmpty() && selected.containsAll(allShown)
-                    TextButton(onClick = {
-                        selected = if (allSelected) emptySet() else allShown
-                    }) {
-                        Text(
-                            stringResource(if (allSelected) R.string.action_deselect_all else R.string.action_select_all),
-                            color = accent.color,
+            } else {
+                Box {
+                    HeaderIconButton(
+                        icon = Icons.Filled.MoreHoriz,
+                        contentDescription = stringResource(R.string.cd_more),
+                        onClick = { headerMenu = true },
+                    )
+                    DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
+                        CoverActions(
+                            hasCustom = page.playlist?.coverUri != null,
+                            onChange = { headerMenu = false; pickCover() },
+                            onReset = { headerMenu = false; vm.removeCover(playlistId) },
                         )
-                    }
-                } else {
-                    Box {
-                        HeaderIconButton(
-                            icon = Icons.Filled.MoreHoriz,
-                            contentDescription = stringResource(R.string.cd_more),
-                            onClick = { headerMenu = true },
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.action_import_folder)) },
+                            onClick = { headerMenu = false; folderPicker.launch(null) },
                         )
-                        DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
-                            CoverActions(
-                                hasCustom = page.playlist?.coverUri != null,
-                                onChange = { headerMenu = false; pickCover() },
-                                onReset = { headerMenu = false; vm.removeCover(playlistId) },
+                        if (page.playlist?.isSystem != true) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.playlist_rename)) },
+                                onClick = { headerMenu = false; renaming = true },
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.action_import_folder)) },
-                                onClick = { headerMenu = false; folderPicker.launch(null) },
+                                text = { Text(stringResource(R.string.playlist_delete)) },
+                                onClick = { headerMenu = false; confirmDelete = true },
                             )
-                            if (page.playlist?.isSystem != true) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.playlist_rename)) },
-                                    onClick = { headerMenu = false; renaming = true },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.playlist_delete)) },
-                                    onClick = { headerMenu = false; confirmDelete = true },
-                                )
-                            }
                         }
                     }
                 }
-            },
-        )
+            }
+        }
         if (importing) {
             LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth().height(2.dp),
@@ -351,7 +405,38 @@ fun PlaylistDetailScreen(
             )
         }
 
-        if (!selecting) {
+        if (selecting) {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 6.dp)) {
+                Text(
+                    stringResource(R.string.selected_count, selected.size),
+                    style = MaterialTheme.typography.displaySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            CollapsingHeader(offset = headerOffset.floatValue) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { size ->
+                            if (headerHeight.intValue != size.height) headerHeight.intValue = size.height
+                        },
+                ) {
+                    Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 6.dp)) {
+                        Text(
+                            page.playlist?.name ?: stringResource(R.string.playlist_missing),
+                            style = MaterialTheme.typography.displaySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            stringResource(R.string.smart_count, page.tracks.size),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = palette.secondaryLabel,
+                            maxLines = 1,
+                        )
+                    }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -417,6 +502,8 @@ fun PlaylistDetailScreen(
                     onClick = { selecting = true },
                 )
             }
+                }
+            }
         }
 
         Row(
@@ -439,7 +526,7 @@ fun PlaylistDetailScreen(
             androidx.compose.foundation.text.BasicTextField(
                 value = query,
                 onValueChange = { query = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).wrapContentHeight(Alignment.CenterVertically),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.label),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent.color),
@@ -705,3 +792,95 @@ private fun CoverActions(hasCustom: Boolean, onChange: () -> Unit, onReset: () -
 }
 
 private enum class PlaylistSort { Order, Title, Artist, Album }
+
+/** Shrinks its content upward as [offset] goes from 0 to -height. */
+@Composable
+private fun CollapsingHeader(
+    offset: Float,
+    content: @Composable () -> Unit,
+) {
+    Layout(
+        content = content,
+        modifier = Modifier.fillMaxWidth().clipToBounds(),
+    ) { measurables, constraints ->
+        val placeable = measurables.first().measure(
+            constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity),
+        )
+        val visible = (placeable.height + offset).roundToInt().coerceIn(0, placeable.height)
+        layout(placeable.width, visible) {
+            placeable.placeWithLayer(0, offset.roundToInt()) {
+                alpha = if (placeable.height == 0) 1f else {
+                    (1f + offset / placeable.height).coerceIn(0f, 1f)
+                }
+            }
+        }
+    }
+}
+
+/** Collapses the playlist title while the song list is scrolled, and opens it again at the top. */
+private class PlaylistHeaderScroll(
+    private val scope: CoroutineScope,
+    private val offset: MutableFloatState,
+    private val height: MutableIntState,
+    private val selecting: State<Boolean>,
+    private val dragging: State<Boolean>,
+    private val atTop: () -> Boolean,
+) : NestedScrollConnection {
+    private var job: Job? = null
+
+    fun jump(target: Float) {
+        job?.cancel()
+        offset.floatValue = target
+    }
+
+    fun settle(target: Float) {
+        job?.cancel()
+        val start = offset.floatValue
+        if (abs(start - target) < 0.5f) {
+            offset.floatValue = target
+            return
+        }
+        job = scope.launch {
+            animate(start, target, animationSpec = tween(220, easing = FastOutSlowInEasing)) { value, _ ->
+                offset.floatValue = value
+            }
+        }
+    }
+
+    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+        if (selecting.value || dragging.value || available.y >= 0f) return Offset.Zero
+        job?.cancel()
+        val limit = height.intValue.toFloat()
+        if (limit <= 0f) return Offset.Zero
+        val next = (offset.floatValue + available.y).coerceIn(-limit, 0f)
+        val consumed = next - offset.floatValue
+        if (consumed == 0f) return Offset.Zero
+        offset.floatValue = next
+        return Offset(0f, consumed)
+    }
+
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+        if (selecting.value || dragging.value || available.y <= 0f || !atTop()) return Offset.Zero
+        job?.cancel()
+        val limit = height.intValue.toFloat()
+        val next = (offset.floatValue + available.y).coerceIn(-limit, 0f)
+        val used = next - offset.floatValue
+        if (used == 0f) return Offset.Zero
+        offset.floatValue = next
+        return Offset(0f, used)
+    }
+
+    override suspend fun onPreFling(available: Velocity): Velocity {
+        val limit = height.intValue.toFloat()
+        val current = offset.floatValue
+        if (selecting.value || dragging.value || limit <= 0f) return Velocity.Zero
+        if (current >= -0.5f || current <= -limit + 0.5f) return Velocity.Zero
+        val target = when {
+            !atTop() -> -limit
+            available.y < -80f || current < -limit / 2f -> -limit
+            else -> 0f
+        }
+        settle(target)
+        return if (target == 0f) available else Velocity.Zero
+    }
+}

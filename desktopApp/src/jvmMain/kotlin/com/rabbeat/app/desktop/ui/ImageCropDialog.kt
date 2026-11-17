@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import com.rabbeat.app.desktop.library.LibraryScanner
+import com.rabbeat.app.desktop.sys.DesktopSettings
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import java.io.File
@@ -322,7 +322,7 @@ fun ImageCropDialog(
                                 val out = withContext(Dispatchers.IO) {
                                     cropImageToJpeg(
                                         source, spec, maxSide,
-                                        File(LibraryScanner.dataDir(), "art"), outName,
+                                        DesktopSettings().artRoot(), outName,
                                     )
                                 }
                                 if (out != null) onConfirm(out)

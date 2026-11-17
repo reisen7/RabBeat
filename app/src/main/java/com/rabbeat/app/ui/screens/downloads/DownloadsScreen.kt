@@ -1,5 +1,6 @@
 package com.rabbeat.app.ui.screens.downloads
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,18 +20,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +51,7 @@ import com.rabbeat.app.domain.model.DownloadItem
 import com.rabbeat.app.domain.model.DownloadState
 import com.rabbeat.app.domain.repository.DownloadRepository
 import com.rabbeat.app.domain.repository.SettingsRepository
+import com.rabbeat.app.data.local.DeviceSync
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.FailedState
 import com.rabbeat.app.ui.components.GlassGroup
@@ -71,6 +80,7 @@ data class DownloadPage(val items: List<DownloadItem>, val cellCache: Boolean)
 class DownloadsViewModel @Inject constructor(
     private val downloads: DownloadRepository,
     private val settings: SettingsRepository,
+    private val sync: DeviceSync,
 ) : ViewModel() {
     val page = combine(
         downloads.observeDownloads(),
@@ -82,12 +92,18 @@ class DownloadsViewModel @Inject constructor(
 
     fun setCellCache(value: Boolean) { viewModelScope.launch { settings.setCellularOnlineCache(value) } }
     fun clear() { viewModelScope.launch { downloads.clearCompleted() } }
+    fun clearSynced(onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            onDone(runCatching { sync.clearReceived() }.getOrDefault(-1))
+        }
+    }
 }
 
 @Composable
 fun DownloadsScreen(onBack: () -> Unit, vm: DownloadsViewModel = hiltViewModel()) {
     val state by vm.page.collectAsStateWithLifecycle()
-    val accent = LocalAccentPalette.current
+    val context = LocalContext.current
+    var clearSyncConfirm by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             title = stringResource(R.string.downloads_title),
@@ -111,13 +127,48 @@ fun DownloadsScreen(onBack: () -> Unit, vm: DownloadsViewModel = hiltViewModel()
             ScreenState.Loading -> LoadingState(Modifier.weight(1f).fillMaxWidth())
             ScreenState.Failed -> FailedState(Modifier.weight(1f).fillMaxWidth()) { }
             ScreenState.Empty -> EmptyState(stringResource(R.string.empty_downloads), Modifier.weight(1f).fillMaxWidth())
-            is ScreenState.Ready -> DownloadBody(current.value, vm, Modifier.weight(1f))
+            is ScreenState.Ready -> DownloadBody(
+                current.value,
+                vm,
+                Modifier.weight(1f),
+                onClearSync = { clearSyncConfirm = true },
+            )
         }
+    }
+    if (clearSyncConfirm) {
+        AlertDialog(
+            onDismissRequest = { clearSyncConfirm = false },
+            title = { Text(stringResource(R.string.downloads_clear_sync_title)) },
+            text = { Text(stringResource(R.string.downloads_clear_sync_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    clearSyncConfirm = false
+                    vm.clearSynced { count ->
+                        val message = when {
+                            count < 0 -> context.getString(R.string.downloads_clear_sync_failed)
+                            count == 0 -> context.getString(R.string.downloads_clear_sync_empty)
+                            else -> context.getString(R.string.downloads_clear_sync_done, count)
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text(stringResource(R.string.downloads_clear_sync_action)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { clearSyncConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun DownloadBody(page: DownloadPage, vm: DownloadsViewModel, modifier: Modifier = Modifier) {
+private fun DownloadBody(
+    page: DownloadPage,
+    vm: DownloadsViewModel,
+    modifier: Modifier = Modifier,
+    onClearSync: () -> Unit,
+) {
     val done = page.items.filter { it.state == DownloadState.DOWNLOADED }
     val active = page.items.filter { it.state != DownloadState.DOWNLOADED }
     val bytes = done.sumOf { it.sizeBytes }
@@ -180,6 +231,14 @@ private fun DownloadBody(page: DownloadPage, vm: DownloadsViewModel, modifier: M
                             colors = SwitchDefaults.colors(checkedTrackColor = androidx.compose.ui.graphics.Color(0xFF34C759), checkedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedThumbColor = androidx.compose.ui.graphics.Color.White, uncheckedTrackColor = com.rabbeat.app.ui.theme.LocalRabBeatPalette.current.fill, uncheckedBorderColor = androidx.compose.ui.graphics.Color.Transparent),
                         )
                     },
+                )
+                GroupDivider()
+                SettingRow(
+                    icon = Icons.Filled.DeleteSweep,
+                    iconColor = androidx.compose.ui.graphics.Color(0xFFFF3B30),
+                    title = stringResource(R.string.downloads_clear_sync),
+                    subtitle = stringResource(R.string.downloads_clear_sync_body),
+                    onClick = onClearSync,
                 )
             }
         }

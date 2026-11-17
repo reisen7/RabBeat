@@ -1,8 +1,9 @@
 package com.rabbeat.app.data.repository
 
-import androidx.room.withTransaction
+import com.rabbeat.app.data.local.inTransaction
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.PlaylistCoverStore
+import com.rabbeat.app.data.local.PlaylistOrderClock
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.reorderedPositions
 import com.rabbeat.app.data.local.dao.PlaylistDao
@@ -28,6 +29,7 @@ class PlaylistRepositoryImpl @Inject constructor(
     private val likedPlaylist: LikedPlaylist,
     private val database: RabBeatDatabase,
     private val coverStore: PlaylistCoverStore,
+    private val orderClock: PlaylistOrderClock,
 ) : PlaylistRepository {
     override fun observePlaylists(): Flow<List<UserPlaylist>> =
         combine(
@@ -73,6 +75,7 @@ class PlaylistRepositoryImpl @Inject constructor(
                 sortOrder = (playlistDao.minSortOrder() ?: 0) - 1,
             ),
         )
+        orderClock.note()
         return id
     }
 
@@ -85,6 +88,7 @@ class PlaylistRepositoryImpl @Inject constructor(
 
     override suspend fun setCoverUri(id: String, uri: String?) {
         playlistDao.setCover(id, uri)
+        playlistDao.touch(id, System.currentTimeMillis())
     }
 
     override suspend fun delete(id: String) {
@@ -92,25 +96,30 @@ class PlaylistRepositoryImpl @Inject constructor(
         playlistDao.deleteTracks(id)
         playlistDao.delete(id)
         coverStore.release(id)
+        orderClock.note()
     }
 
     override suspend fun deleteMany(ids: List<String>) {
-        database.withTransaction {
+        var removed = false
+        database.inTransaction {
             ids.forEach { id ->
                 if (playlistDao.get(id)?.isSystem == true) return@forEach
                 playlistDao.deleteTracks(id)
                 playlistDao.delete(id)
                 coverStore.release(id)
+                removed = true
             }
         }
+        if (removed) orderClock.note()
     }
 
     override suspend fun reorder(orderedIds: List<String>) {
-        database.withTransaction {
+        database.inTransaction {
             orderedIds.forEachIndexed { index, id ->
                 playlistDao.setSortOrder(id, index)
             }
         }
+        orderClock.note()
     }
 
     override suspend fun addTracks(playlistId: String, trackIds: List<String>): Int {
@@ -133,7 +142,7 @@ class PlaylistRepositoryImpl @Inject constructor(
     override suspend fun removeTracks(playlistId: String, trackIds: List<String>) {
         val ids = trackIds.distinct()
         if (ids.isEmpty()) return
-        database.withTransaction {
+        database.inTransaction {
             ids.chunked(400).forEach { playlistDao.removeTracksIn(playlistId, it) }
             playlistDao.touch(playlistId, System.currentTimeMillis())
         }
@@ -141,7 +150,7 @@ class PlaylistRepositoryImpl @Inject constructor(
     }
 
     override suspend fun reorderTracks(playlistId: String, orderedTrackIds: List<String>) {
-        database.withTransaction {
+        database.inTransaction {
             val existing = playlistDao.refs(playlistId).map { it.trackId }
             reorderedPositions(existing, orderedTrackIds).forEachIndexed { index, trackId ->
                 playlistDao.setTrackPosition(playlistId, trackId, index)

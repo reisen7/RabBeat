@@ -14,8 +14,14 @@ import com.rabbeat.app.playback.PlaybackUiState
 import com.rabbeat.app.playback.QueueManager
 import com.rabbeat.app.util.NcmDecoderCore
 import com.rabbeat.app.util.QmcDecoderCore
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.InputStream
 import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
@@ -47,6 +53,10 @@ class DesktopPlayerController(
 ) : PlaybackController {
 
     private val json = Json { ignoreUnknownKeys = true }
+    private val http: HttpClient = HttpClient.newBuilder()
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .connectTimeout(Duration.ofSeconds(20))
+        .build()
     private val _state = MutableStateFlow(PlaybackUiState(restoring = false))
     override val state = _state.asStateFlow()
 
@@ -97,7 +107,10 @@ class DesktopPlayerController(
     private var restored = false
 
     init {
-        scope.launch { restore() }
+        scope.launch {
+            relocateCacheExtras(db, settings)
+            restore()
+        }
         scope.launch { watchProgress() }
         scope.launch(Dispatchers.IO) {
             val legacy = File(LibraryScanner.dataDir(), "decoded")
@@ -155,9 +168,10 @@ class DesktopPlayerController(
         val duration = queue.getOrNull(index)?.durationMs ?: 0L
         val target = positionMs.coerceIn(0L, if (duration > 0L) duration else Long.MAX_VALUE)
         val wasPlaying = _state.value.isPlaying || line != null
+        basePositionMs = target
+        _state.value = _state.value.copy(positionMs = target)
         if (!wasPlaying) {
             publish(false)
-            _state.value = _state.value.copy(positionMs = target)
             return
         }
         startTrack(seekMs = target, play = !paused)
@@ -248,6 +262,36 @@ class DesktopPlayerController(
         scope.launch { persist() }
     }
 
+    /** Point queued tracks at files that just moved with the convert directory. */
+    fun remapUris(rewrite: (String) -> String) {
+        var changed = false
+        queue = queue.map { track ->
+            val next = rewrite(track.uri)
+            if (next == track.uri) {
+                track
+            } else {
+                changed = true
+                track.copy(uri = next)
+            }
+        }
+        if (changed) publish(_state.value.isPlaying)
+    }
+
+    /** Point queued tracks at cover files that just moved with the cache directory. */
+    fun remapArtwork(rewrite: (String?) -> String?) {
+        var changed = false
+        queue = queue.map { track ->
+            val next = rewrite(track.artworkUri)
+            if (next == track.artworkUri) {
+                track
+            } else {
+                changed = true
+                track.copy(artworkUri = next)
+            }
+        }
+        if (changed) publish(_state.value.isPlaying)
+    }
+
     override fun enqueue(track: Track) {
         queue = queue + track
         if (index < 0) {
@@ -286,6 +330,31 @@ class DesktopPlayerController(
         scope.launch { persist() }
     }
 
+    /** Drops queued tracks that are about to leave the library. */
+    override fun dropTracks(ids: Set<String>) {
+        if (ids.isEmpty() || queue.none { it.id in ids }) return
+        val removingCurrent = queue.getOrNull(index)?.id in ids
+        val wasPlaying = _state.value.isPlaying
+        queue = queue.filter { it.id !in ids }
+        shuffleHistory.clear()
+        shufflePlayed.clear()
+        if (removingCurrent) {
+            index = if (queue.isEmpty()) -1 else index.coerceIn(0, queue.lastIndex)
+            if (queue.isEmpty()) {
+                synchronized(lineLock) { generation++ }
+                playJob?.cancel()
+                closeLine()
+                publish(false)
+            } else {
+                startTrack(0L, play = wasPlaying)
+            }
+        } else {
+            if (index > queue.lastIndex) index = queue.lastIndex
+            publish(wasPlaying && queue.isNotEmpty())
+        }
+        scope.launch { persist() }
+    }
+
     override fun clearUpcoming() {
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)
@@ -300,6 +369,7 @@ class DesktopPlayerController(
 
     private fun advance(delta: Int, play: Boolean = true) {
         if (queue.isEmpty()) return
+        val from = queue.getOrNull(index)
         val next = if (delta > 0 && shuffle && queue.size > 1) {
             val unplayed = queue.indices.filter { it != index && it !in shufflePlayed }
             when {
@@ -313,7 +383,15 @@ class DesktopPlayerController(
         } else {
             (index + delta).let { if (repeatMode == RepeatMode.ALL) Math.floorMod(it, queue.size) else it.coerceIn(queue.indices) }
         }
-        if (next !in queue.indices) { publish(_state.value.isPlaying); return }
+        if (next !in queue.indices) {
+            DesktopLog.i("Player", "advance stop \"${from?.title}\" pos=${currentPositionMs()}ms delta=$delta")
+            publish(_state.value.isPlaying)
+            return
+        }
+        DesktopLog.i(
+            "Player",
+            "advance delta=$delta \"${from?.title}\"@${currentPositionMs()}ms -> \"${queue[next].title}\" dur=${queue[next].durationMs}ms",
+        )
         if (delta > 0 && shuffle) shuffleHistory.addLast(index)
         index = next
         startTrack(0L, play = play)
@@ -322,42 +400,105 @@ class DesktopPlayerController(
     private fun startTrack(seekMs: Long, play: Boolean) {
         val track = queue.getOrNull(index) ?: return
         val gen = synchronized(lineLock) { ++generation }
+        DesktopLog.i("Player", "start \"${track.title}\" id=${track.id} dur=${track.durationMs}ms seek=$seekMs play=$play")
         playJob?.cancel()
         closeLine()
+        basePositionMs = seekMs
+        _state.value = _state.value.copy(positionMs = seekMs)
         _loading.value = true
         playJob = scope.launch(Dispatchers.IO) {
             val prepared = prepareLine(track, seekMs)
             if (prepared == null) {
+                DesktopLog.e("Player", "prepare failed \"${track.title}\" err=$error")
                 onTrackFailed(gen)
                 return@launch
             }
             if (gen != generation) {
-                runCatching { prepared.second.close() }
-                runCatching { prepared.first.close() }
+                runCatching { prepared.stream.close() }
+                runCatching { prepared.line.close() }
                 return@launch
             }
             synchronized(lineLock) {
                 if (gen != generation) {
-                    runCatching { prepared.second.close() }
-                    runCatching { prepared.first.close() }
+                    runCatching { prepared.stream.close() }
+                    runCatching { prepared.line.close() }
                     return@launch
                 }
-                stream = prepared.second
-                line = prepared.first
+                stream = prepared.stream
+                line = prepared.line
             }
-            basePositionMs = seekMs
+            basePositionMs = prepared.positionMs
             paused = !play
             error = null
             consecutiveFailures = 0
             applyGain()
-            if (play) prepared.first.start() else prepared.first.stop()
+            if (play) prepared.line.start() else prepared.line.stop()
             _loading.value = false
             publish(play)
             if (shuffle) shufflePlayed += index
             persist()
-            val ended = pump(prepared.first, prepared.second, gen)
+            var ended = pump(prepared.line, prepared.stream, gen, track)
+            DesktopLog.i(
+                "Player",
+                "pump \"${track.title}\" ended=$ended pos=${currentPositionMs()}ms dur=${track.durationMs}ms live=${gen == generation}",
+            )
+            if (ended && gen == generation && prematureEnd()) {
+                // Decoder hit EOF far before the tagged duration — corrupt data
+                // or desync mid-file. Reopen, jump past the region, keep pumping
+                // on the same line so playback continues when the tail is fine.
+                DesktopLog.w("Player", "premature \"${track.title}\" pos=${currentPositionMs()}ms dur=${track.durationMs}ms")
+                resyncStream(track)?.let { rs ->
+                    synchronized(lineLock) {
+                        runCatching { stream?.close() }
+                        stream = rs
+                    }
+                    ended = pump(prepared.line, rs, gen, track)
+                    DesktopLog.i(
+                        "Player",
+                        "resync pump \"${track.title}\" ended=$ended pos=${currentPositionMs()}ms dur=${track.durationMs}ms",
+                    )
+                }
+            }
             closeLine()
-            if (ended && gen == generation) onTrackEnded()
+            if (ended && gen == generation) {
+                if (prematureEnd()) {
+                    DesktopLog.w("Player", "give up \"${track.title}\" pos=${currentPositionMs()}ms dur=${track.durationMs}ms")
+                    onTrackFailed(gen)
+                } else {
+                    onTrackEnded()
+                }
+            }
+        }
+    }
+
+    /** Pump ended but the track is far from its tagged duration — decode stall, not a real end. */
+    private fun prematureEnd(): Boolean {
+        val dur = queue.getOrNull(index)?.durationMs ?: return false
+        return dur > 0 && currentPositionMs() < dur - 5_000L
+    }
+
+    /** Reopens the source and skips ~256KB of compressed data to jump a stuck decoder past a corrupt region. */
+    private fun resyncStream(track: Track): AudioInputStream? {
+        val pos = currentPositionMs()
+        return runCatching {
+            val source = resolveSource(track)
+            val raw = AudioSystem.getAudioInputStream(source)
+            var left = 256L * 1024
+            var skippedTotal = 0L
+            while (left > 0) {
+                val skipped = raw.skip(left)
+                if (skipped <= 0) break
+                left -= skipped
+                skippedTotal += skipped
+            }
+            DesktopLog.w("Player", "resync \"${track.title}\" pos=${pos}ms skipped=$skippedTotal file=${source.length()}")
+            val pcm = AudioFormat(
+                AudioFormat.Encoding.PCM_SIGNED, 44100f, 16, 2, 4, 44100f, false,
+            )
+            AudioSystem.getAudioInputStream(pcm, raw)
+        }.getOrElse {
+            DesktopLog.e("Player", "resync failed \"${track.title}\" pos=${pos}ms ${it.brief()}")
+            null
         }
     }
 
@@ -365,6 +506,10 @@ class DesktopPlayerController(
     private suspend fun onTrackFailed(gen: Int) {
         if (gen != generation) return
         consecutiveFailures++
+        DesktopLog.w(
+            "Player",
+            "failed \"${queue.getOrNull(index)?.title}\" pos=${currentPositionMs()}ms failures=$consecutiveFailures err=$error",
+        )
         if (shuffle) shufflePlayed += index
         error = error ?: "无法解码 ${queue.getOrNull(index)?.title ?: ""}"
         _loading.value = false
@@ -376,22 +521,80 @@ class DesktopPlayerController(
         if (gen == generation) advance(1)
     }
 
+    private class OpenedAudio(
+        val line: SourceDataLine,
+        val stream: AudioInputStream,
+        val positionMs: Long,
+    )
+
     /** Returns the open line + decoded PCM stream, or null when undecodable. */
-    private suspend fun prepareLine(track: Track, seekMs: Long): Pair<SourceDataLine, AudioInputStream>? = withContext(Dispatchers.IO) {
+    private suspend fun prepareLine(track: Track, seekMs: Long): OpenedAudio? = withContext(Dispatchers.IO) {
         runCatching {
             val source = resolveSource(track)
-            val raw = AudioSystem.getAudioInputStream(source)
+            val fileFormat = runCatching { AudioSystem.getAudioFileFormat(source) }.getOrNull()
+            DesktopLog.i(
+                "Player",
+                "open \"${track.title}\" file=${source.name} bytes=${source.length()} " +
+                    "type=${fileFormat?.type} frames=${fileFormat?.frameLength} props=${fileFormat?.properties()}",
+            )
+            if (track.durationMs <= 0L) {
+                // Tag-broken files import with duration 0 → no seek bar. The SPI
+                // file-format "duration" property (µs) usually still knows it.
+                runCatching {
+                    (AudioSystem.getAudioFileFormat(source).properties()["duration"] as? Number)
+                        ?.toLong()?.div(1000L)?.takeIf { it > 0 }
+                }.getOrNull()?.let { ms ->
+                    queue = queue.map { if (it.id == track.id) it.copy(durationMs = ms) else it }
+                    db.trackDao().setDurationMs(track.id, ms)
+                }
+            }
+            val mp3 = fileFormat?.type?.toString()?.contains("MP3", ignoreCase = true) == true ||
+                source.extension.equals("mp3", ignoreCase = true)
+            var positionMs = seekMs
+            if (mp3 && fileLooksShort(source, track, fileFormat)) {
+                val end = Mp3Seek.locate(source, Long.MAX_VALUE)
+                if (end != null && end.endMs > 0 && track.durationMs > end.endMs + 2_000) {
+                    DesktopLog.w(
+                        "Player",
+                        "short file \"${track.title}\" tag=${track.durationMs}ms audio=${end.endMs}ms bytes=${source.length()}",
+                    )
+                    queue = queue.map { if (it.id == track.id) it.copy(durationMs = end.endMs) else it }
+                    db.trackDao().setDurationMs(track.id, end.endMs)
+                    if (positionMs > end.endMs) positionMs = 0L
+                }
+            }
+            val point = if (mp3 && positionMs > 0L) Mp3Seek.locate(source, positionMs) else null
+            val positioned = if (point != null && point.reached && point.offset > 0L) {
+                // FileInputStream has no mark(). jflac treats that as a hard failure and
+                // AudioSystem stops before the MP3 reader gets a turn.
+                val input = BufferedInputStream(source.inputStream(), 64 * 1024)
+                if (skipRaw(input, point.offset)) {
+                    DesktopLog.i("Player", "mp3 seek \"${track.title}\" ${positionMs}ms -> byte ${point.offset}")
+                    AudioSystem.getAudioInputStream(input)
+                } else {
+                    input.close()
+                    null
+                }
+            } else {
+                null
+            }
+            val raw = positioned ?: AudioSystem.getAudioInputStream(source)
             val pcm = AudioFormat(
                 AudioFormat.Encoding.PCM_SIGNED,
                 44100f, 16, 2, 4, 44100f, false,
             )
             val decoded = AudioSystem.getAudioInputStream(pcm, raw)
-            if (seekMs > 0L) skipFully(decoded, (seekMs / 1000.0 * pcm.frameRate).toLong() * pcm.frameSize)
+            DesktopLog.i("Player", "decoded \"${track.title}\" format=${decoded.format} frames=${decoded.frameLength}")
+            if (seekMs > 0L && positioned == null) {
+                val pcmBytes = (seekMs / 1000.0 * pcm.frameRate).toLong() * pcm.frameSize
+                if (mp3) skipByDecoding(decoded, pcmBytes) else skipFully(decoded, pcmBytes)
+            }
             val l = AudioSystem.getSourceDataLine(pcm)
             l.open(pcm)
-            l to decoded
+            OpenedAudio(l, decoded, positionMs)
         }.getOrElse {
             error = it.message
+            DesktopLog.e("Player", "prepare \"${track.title}\" ${it.brief()}")
             null
         }
     }
@@ -401,16 +604,59 @@ class DesktopPlayerController(
         if (!track.uri.startsWith("http")) return resolveFile(track)
         val dir = settings.cacheRoot().apply { mkdirs() }
         val cached = File(dir, "${track.id}.audio")
+        if (cached.isFile && cached.length() == 0L) cached.delete()
         if (cached.isFile && cached.length() > 0) return cached
         val tmp = File(dir, "${track.id}.part")
         runCatching {
-            URI(track.uri).toURL().openStream().use { input ->
-                tmp.outputStream().use { input.copyTo(it, 64 * 1024) }
-            }
+            downloadHttp(track.uri, tmp)
             if (!tmp.renameTo(cached)) tmp.copyTo(cached, overwrite = true)
-        }.onFailure { tmp.delete() }
+        }.onFailure {
+            tmp.delete()
+            DesktopLog.e("Player", "download \"${track.title}\" ${it.message}")
+        }
         return if (cached.isFile && cached.length() > 0) cached
         else throw java.io.IOException("下载失败: ${track.title}")
+    }
+
+    /**
+     * NetEase's outer link answers 302 from https to an http CDN. Java's normal
+     * redirect policy drops that hop and the body comes back empty.
+     */
+    private fun downloadHttp(url: String, dest: File) {
+        var current = URI(url)
+        repeat(5) {
+            val request = HttpRequest.newBuilder(current)
+                .timeout(Duration.ofMinutes(3))
+                .header("User-Agent", "Mozilla/5.0")
+                .header("Referer", "https://music.163.com/")
+                .GET()
+                .build()
+            val response = http.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            val code = response.statusCode()
+            if (code in 300..399) {
+                val location = response.headers().firstValue("Location").orElse(null)
+                response.body().close()
+                if (location.isNullOrBlank()) throw java.io.IOException("没有跳转地址 ($code)")
+                current = current.resolve(location)
+                return@repeat
+            }
+            if (code != 200) {
+                response.body().close()
+                throw java.io.IOException("HTTP $code")
+            }
+            val type = response.headers().firstValue("Content-Type").orElse("")
+            if (type.startsWith("text/") || type.contains("html", ignoreCase = true)) {
+                response.body().close()
+                throw java.io.IOException("返回的不是音频 ($type)")
+            }
+            response.body().use { input ->
+                dest.outputStream().use { input.copyTo(it, 64 * 1024) }
+            }
+            if (dest.length() <= 0L) throw java.io.IOException("空文件")
+            DesktopLog.i("Player", "downloaded ${dest.length()}B from ${current.host}")
+            return
+        }
+        throw java.io.IOException("跳转过多")
     }
 
     private fun resolveFile(track: Track): File {
@@ -427,18 +673,53 @@ class DesktopPlayerController(
     }
 
     /** Feeds decoded PCM into the line until EOF or cancellation. Returns true on natural EOF. */
-    private fun pump(l: SourceDataLine, inStream: AudioInputStream, gen: Int): Boolean {
+    private fun pump(l: SourceDataLine, inStream: AudioInputStream, gen: Int, track: Track): Boolean {
         val buf = ByteArray(8192)
+        var zeroReads = 0
+        var bytes = 0L
+        var nextMarkSec = basePositionMs / 1000L + 15L
         while (true) {
-            if (generation != gen) return false
-            val n = runCatching { inStream.read(buf) }.getOrElse { return false }
-            if (n < 0) return true
+            if (generation != gen) {
+                DesktopLog.i("Player", "pump cancel \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes")
+                return false
+            }
+            val n = try {
+                inStream.read(buf)
+            } catch (t: Throwable) {
+                DesktopLog.e("Player", "read \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes ${t.brief()}")
+                return false
+            }
+            if (n < 0) {
+                DesktopLog.w("Player", "eof \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes dur=${track.durationMs}ms")
+                return true
+            }
+            if (n == 0) {
+                // Corrupt tail frames can make decode SPIs return 0 forever —
+                // treat a sustained run of empty reads as EOF, else the track stalls.
+                if (++zeroReads > 600) {
+                    DesktopLog.w("Player", "zero-read \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes dur=${track.durationMs}ms")
+                    return true
+                }
+                Thread.sleep(2)
+                continue
+            }
+            zeroReads = 0
+            bytes += n
+            val audioSec = basePositionMs / 1000L + bytes / 176_400L
+            if (audioSec >= nextMarkSec) {
+                DesktopLog.i("Player", "pos \"${track.title}\" audio=${audioSec}s line=${currentPositionMs()}ms bytes=$bytes")
+                nextMarkSec = audioSec + 15L
+            }
             var off = 0
             while (off < n) {
-                if (generation != gen) return false
+                if (generation != gen) {
+                    DesktopLog.i("Player", "pump cancel \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes")
+                    return false
+                }
                 off += try {
                     l.write(buf, off, n - off)
-                } catch (_: Exception) {
+                } catch (t: Exception) {
+                    DesktopLog.e("Player", "write \"${track.title}\" pos=${currentPositionMs()}ms bytes=$bytes ${t.brief()}")
                     return false
                 }
             }
@@ -447,6 +728,7 @@ class DesktopPlayerController(
 
     private fun onTrackEnded() {
         val ended = queue.getOrNull(index)
+        DesktopLog.i("Player", "natural end \"${ended?.title}\" pos=${currentPositionMs()}ms dur=${ended?.durationMs}ms repeat=$repeatMode")
         if (ended != null) {
             scope.launch { db.trackDao().markPlayed(ended.id, System.currentTimeMillis()) }
         }
@@ -586,10 +868,65 @@ class DesktopPlayerController(
         publish(false)
     }
 
+    private fun Throwable.brief(): String {
+        val top = stackTrace.take(6).joinToString(" | ") {
+            "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
+        }
+        return "${javaClass.simpleName}: $message [$top]"
+    }
+
+    /** Tag duration claims far more audio than this file can hold at its nominal bitrate. */
+    private fun fileLooksShort(source: File, track: Track, fileFormat: javax.sound.sampled.AudioFileFormat?): Boolean {
+        val bps = (fileFormat?.properties()?.get("mp3.bitrate.nominal.bps") as? Number)?.toLong() ?: return false
+        if (bps <= 0L || track.durationMs <= 0L) return false
+        val expected = track.durationMs * bps / 8_000
+        return source.length() < expected * 85 / 100
+    }
+
+    private fun skipRaw(input: InputStream, bytes: Long): Boolean {
+        var remaining = bytes
+        val buf = ByteArray(8192)
+        while (remaining > 0) {
+            val skipped = input.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+                continue
+            }
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            if (n <= 0) return false
+            remaining -= n
+        }
+        return true
+    }
+
+    /** Discard already-decoded PCM. Used when an MP3 frame walk could not position the file. */
+    private fun skipByDecoding(input: AudioInputStream, bytes: Long) {
+        var remaining = bytes
+        val buf = ByteArray(64 * 1024)
+        while (remaining > 0) {
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            if (n <= 0) {
+                DesktopLog.w("Player", "seek decode short by ${remaining}B of $bytes")
+                return
+            }
+            remaining -= n
+        }
+    }
+
     private fun skipFully(input: AudioInputStream, bytes: Long) {
         var remaining = bytes
+        val buf = ByteArray(8192)
         while (remaining > 0) {
-            remaining -= input.skip(remaining)
+            val skipped = input.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+                continue
+            }
+            // Decoded streams (mp3spi/jflac/vorbisspi) often report skip() == 0;
+            // fall back to decoding and discarding so we never spin forever.
+            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+            if (n <= 0) return
+            remaining -= n
         }
     }
 

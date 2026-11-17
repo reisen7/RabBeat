@@ -132,5 +132,6 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.palette)
     implementation("androidx.documentfile:documentfile:1.1.0")
+    implementation(libs.zxing.android)
     testImplementation("junit:junit:4.13.2")
 }

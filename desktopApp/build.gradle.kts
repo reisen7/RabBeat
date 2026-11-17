@@ -29,6 +29,7 @@ kotlin {
                 implementation("org.jaudiotagger:jaudiotagger:2.0.1")
                 implementation("com.googlecode.soundlibs:mp3spi:1.9.5.4")
                 implementation("org.jflac:jflac-codec:1.5.2")
+                implementation(libs.zxing.core)
                 implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
             }
         }
@@ -59,6 +60,11 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
+            // These are left out of the jlink runtime otherwise.
+            // java.net.http: NeteaseClient / update check.
+            // jdk.httpserver: the phone-sync listener. Without it, 开始 throws
+            // NoClassDefFoundError and the row never changes.
+            modules("java.net.http", "jdk.crypto.ec", "jdk.httpserver")
             packageName = "RabBeat"
             packageVersion = numericVersion
             description = "RabBeat - local music player"
@@ -74,6 +80,10 @@ compose.desktop {
                 upgradeUuid = "5f7d0c4e-2c8a-4f6e-9b1d-3a8e6c5d2f01"
                 iconFile.set(project.file("packaging/rabbeat.ico"))
             }
+        }
+
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("proguard-rules.pro"))
         }
     }
 }
@@ -103,13 +113,78 @@ tasks.register<JavaExec>("seedDemoLibrary") {
         ?: layout.buildDirectory.dir("demo-data").get().asFile.absolutePath)
 }
 
-// Portable zip of the jpackage app image (no installer, no admin needed).
+// createDistributable deletes this directory first. If a previous RabBeat.exe
+// still has the runtime jars open, that delete fails with a generic Gradle
+// error. Move it aside ourselves so the message says what to do.
+val prepareAppImageDir = tasks.register("prepareAppImageDir") {
+    group = "compose desktop"
+    description = "Move aside a previous app image so packaging can replace it"
+    doFirst {
+        val dir = layout.buildDirectory.dir("compose/binaries/main/app").get().asFile
+        if (!dir.exists()) return@doFirst
+        val trash = dir.parentFile.resolve("app-stale-${System.currentTimeMillis()}")
+        if (!dir.renameTo(trash)) {
+            throw GradleException(
+                "打包目录被占用，先从托盘退出 RabBeat，再重新打包。\n${dir.absolutePath}",
+            )
+        }
+        if (!trash.deleteRecursively()) {
+            logger.warn("旧的打包目录没删掉，可以稍后手动删除：${trash.absolutePath}")
+        }
+    }
+}
+
+tasks.matching { it.name == "createDistributable" }.configureEach {
+    dependsOn(prepareAppImageDir)
+}
+
+// packageExe also runs jpackage. Keep it after the app image so the two
+// don't write the shared runtime image at the same time.
+tasks.matching { it.name == "packageExe" }.configureEach {
+    mustRunAfter("createDistributable")
+}
+
+// Portable zip of the jpackage app image. Unzip and run RabBeat.exe.
 tasks.register<Zip>("packagePortableZip") {
     group = "compose desktop"
-    description = "Zip the composed app image as a portable package"
+    description = "Build a portable Windows zip with RabBeat.exe (no installer)"
     dependsOn("createDistributable")
     val appDir = layout.buildDirectory.dir("compose/binaries/main/app/RabBeat")
     from(appDir)
-    archiveFileName.set("RabBeat-$desktopVersion-portable.zip")
+    archiveFileName.set("RabBeat-$desktopVersion-windows-portable.zip")
     destinationDirectory.set(layout.buildDirectory.dir("compose/binaries/main/portable"))
+    doFirst {
+        val exe = appDir.get().asFile.resolve("RabBeat.exe")
+        if (!exe.isFile) {
+            throw GradleException("没有生成 RabBeat.exe：${exe.absolutePath}")
+        }
+    }
+}
+
+// WiX installer from packageExe. jpackage names it RabBeat-<numeric>.exe;
+// publish a stable name that keeps the full version, including a prerelease suffix.
+tasks.register("packageWindowsSetup") {
+    group = "compose desktop"
+    description = "Build the Windows installer and name it RabBeat-<version>-windows-setup.exe"
+    dependsOn("packageExe")
+    val exeDir = layout.buildDirectory.dir("compose/binaries/main/exe")
+    val version = desktopVersion
+    doLast {
+        val dir = exeDir.get().asFile
+        val produced = dir.walkTopDown().firstOrNull { file ->
+            file.isFile &&
+                file.extension.equals("exe", ignoreCase = true) &&
+                !file.name.endsWith("-windows-setup.exe")
+        } ?: throw GradleException("没有生成安装包：${dir.absolutePath}")
+        val published = dir.resolve("RabBeat-$version-windows-setup.exe")
+        if (produced.absoluteFile != published.absoluteFile) {
+            produced.copyTo(published, overwrite = true)
+        }
+    }
+}
+
+tasks.register("packageWindows") {
+    group = "compose desktop"
+    description = "Build the portable zip and the Windows installer"
+    dependsOn("packagePortableZip", "packageWindowsSetup")
 }

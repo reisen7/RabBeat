@@ -4,6 +4,7 @@ import com.rabbeat.app.desktop.library.*
 import com.rabbeat.app.desktop.playlist.*
 import com.rabbeat.app.desktop.net.*
 import com.rabbeat.app.desktop.sys.*
+import com.rabbeat.app.desktop.tray.*
 import com.rabbeat.app.desktop.ui.*
 
 import androidx.compose.foundation.border
@@ -13,10 +14,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,7 +30,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Tray
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowPosition
@@ -45,20 +47,21 @@ import com.rabbeat.app.data.local.MIGRATION_4_5
 import com.rabbeat.app.data.local.MIGRATION_5_6
 import com.rabbeat.app.data.local.MIGRATION_6_7
 import com.rabbeat.app.data.local.MIGRATION_7_8
+import com.rabbeat.app.data.local.MIGRATION_8_9
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.domain.model.AccentTheme
 import com.rabbeat.app.domain.model.ThemeMode
-import com.rabbeat.app.sharedui.generated.resources.Res
-import com.rabbeat.app.sharedui.generated.resources.ic_desktop_icon
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 import com.rabbeat.app.ui.theme.RabBeatTheme
 import java.awt.Dimension
-import java.awt.GraphicsEnvironment
+import java.awt.Point
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
+import java.awt.geom.RoundRectangle2D
 import java.io.File
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import org.jetbrains.compose.resources.painterResource
 
 private fun openDatabase(): RabBeatDatabase {
     val dir = LibraryScanner.dataDir().apply { mkdirs() }
@@ -67,7 +70,7 @@ private fun openDatabase(): RabBeatDatabase {
         .setQueryCoroutineContext(Dispatchers.IO)
         .addMigrations(
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+            MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
         )
         .fallbackToDestructiveMigration(true)
         .build()
@@ -137,30 +140,56 @@ fun main() {
             exitApplication()
         }
     }
+    val quitApp: () -> Unit = {
+        persistWindowSize()
+        player.shutdown()
+        exitApplication()
+    }
+    val themeMode = debugTheme() ?: remember(themeTick) { ThemeMode.valueOf(settings.themeMode) }
+    val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
 
-    Tray(
-        icon = painterResource(Res.drawable.ic_desktop_icon),
-        tooltip = "RabBeat",
-        onAction = { windowVisible = true },
-        menu = {
-            Item("显示 RabBeat", onClick = { windowVisible = true })
-            Item(if (playState.isPlaying) "暂停" else "播放", onClick = { player.toggle() })
-            Item("下一首", onClick = { player.next() })
-            Item("上一首", onClick = { player.previous() })
-            Separator()
-            Item("退出", onClick = {
-                persistWindowSize()
-                player.shutdown()
-                exitApplication()
-            })
+    // --- Tray ---
+    var trayMenuVisible by remember { mutableStateOf(false) }
+    var trayMenuAnchor by remember { mutableStateOf(Point(0, 0)) }
+    val showMainWindow: () -> Unit = {
+        windowVisible = true
+        // Reuse the single-instance activation path so a minimized window is
+        // restored and raised, not just made visible.
+        activateTick++
+    }
+    val trayImage = remember { AppIcons.trayIcon() }
+
+    AppTrayIcon(
+        iconImage = trayImage,
+        onShow = showMainWindow,
+        onMenu = { pt ->
+            trayMenuAnchor = pt
+            trayMenuVisible = true
         },
     )
+
+    if (trayMenuVisible) {
+        TrayMenuWindow(
+            anchor = trayMenuAnchor,
+            playState = playState,
+            themeMode = themeMode,
+            accentTheme = accent,
+            onDismiss = { trayMenuVisible = false },
+            onShow = {
+                showMainWindow()
+                trayMenuVisible = false
+            },
+            onToggle = player::toggle,
+            onPrev = player::previous,
+            onNext = player::next,
+            onQuit = quitApp,
+        )
+    }
 
     if (windowVisible) Window(
         onCloseRequest = closeRequest,
         undecorated = true,
         title = "RabBeat",
-        icon = painterResource(Res.drawable.ic_desktop_icon),
         state = windowState,
         onPreviewKeyEvent = { e ->
             if (e.type != KeyEventType.KeyUp) return@Window false
@@ -176,24 +205,53 @@ fun main() {
         },
     ) {
         window.minimumSize = Dimension(1000, 640)
+        // Windows 11 rounded corners via DWM; older systems fall back to an
+        // AWT window shape (re-applied on resize, cleared while maximized).
+        var dwmRounded by remember { mutableStateOf<Boolean?>(null) }
+        SideEffect {
+            WinNative.installBorderlessFrame(window)
+        }
+        // Compose rasterizes a window icon as one 192px image and lets Windows
+        // scale it. That scale is what makes the taskbar copy soft. Apply the
+        // pre-sized set after the window opens, so it replaces that single image.
+        DisposableEffect(window) {
+            val applyIcons = {
+                window.iconImages = AppIcons.windowIcons()
+            }
+            val listener = object : WindowAdapter() {
+                override fun windowOpened(e: WindowEvent) {
+                    applyIcons()
+                }
+            }
+            window.addWindowListener(listener)
+            applyIcons()
+            onDispose { window.removeWindowListener(listener) }
+        }
+        LaunchedEffect(Unit) {
+            dwmRounded = WinNative.applyRoundCorners(window)
+        }
+        LaunchedEffect(dwmRounded, windowState.size, windowState.placement) {
+            if (dwmRounded == false) {
+                window.shape = if (windowState.placement == WindowPlacement.Maximized) {
+                    null
+                } else {
+                    RoundRectangle2D.Float(
+                        0f, 0f, window.width.toFloat(), window.height.toFloat(), 16f, 16f,
+                    )
+                }
+            }
+        }
         LaunchedEffect(activateTick) {
             if (activateTick > 0) {
-                window.extendedState = window.extendedState and java.awt.Frame.ICONIFIED.inv()
-                window.toFront()
+                WinNative.toForeground(window)
                 window.requestFocus()
             }
         }
-        val themeMode = debugTheme() ?: remember(themeTick) { ThemeMode.valueOf(settings.themeMode) }
-        val accent = remember(themeTick) { AccentTheme.valueOf(settings.accent) }
         fun toggleMaximize() {
-            windowState.placement = if (windowState.placement == WindowPlacement.Maximized) {
-                WindowPlacement.Floating
-            } else {
-                runCatching {
-                    window.maximizedBounds =
-                        GraphicsEnvironment.getLocalGraphicsEnvironment().maximumWindowBounds
-                }
-                WindowPlacement.Maximized
+            if (windowState.placement == WindowPlacement.Maximized) {
+                if (!WinNative.restore(window)) windowState.placement = WindowPlacement.Floating
+            } else if (!WinNative.maximize(window)) {
+                windowState.placement = WindowPlacement.Maximized
             }
         }
         RabBeatTheme(themeMode = themeMode, accentTheme = accent, darkPalette = DesktopDarkPalette) {
@@ -227,7 +285,9 @@ fun main() {
                         )
                         WindowControls(
                             placement = windowState.placement,
-                            onMinimize = { windowState.isMinimized = true },
+                            onMinimize = {
+                                if (!WinNative.minimize(window)) windowState.isMinimized = true
+                            },
                             onToggleMaximize = ::toggleMaximize,
                             onClose = closeRequest,
                             modifier = Modifier.align(Alignment.TopEnd),

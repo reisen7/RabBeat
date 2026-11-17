@@ -57,6 +57,14 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `tracks` ADD COLUMN `contentKey` TEXT")
+        connection.execSQL("ALTER TABLE `tracks` ADD COLUMN `syncId` TEXT")
+        connection.execSQL("ALTER TABLE `playlists` ADD COLUMN `syncId` TEXT")
+    }
+}
+
 val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL(

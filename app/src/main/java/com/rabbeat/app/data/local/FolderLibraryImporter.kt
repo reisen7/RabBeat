@@ -6,7 +6,6 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
-import androidx.room.withTransaction
 import com.rabbeat.app.data.local.entity.AlbumEntity
 import com.rabbeat.app.data.local.entity.ArtistEntity
 import com.rabbeat.app.data.local.entity.SourceEntity
@@ -127,7 +126,7 @@ class FolderLibraryImporter @Inject constructor(
             reporter.report(index + 1, total)
         }
         checkActive()
-        val result = database.withTransaction {
+        val result = database.inTransaction {
             val trackDao = database.trackDao()
             val existing = trackDao.getBySource(sourceId).associateBy { it.id }
             val otherEntities = trackDao.getOtherSources(sourceId)
@@ -204,6 +203,9 @@ class FolderLibraryImporter @Inject constructor(
                     addedAt = listOfNotNull(preserved?.addedAt, losers.minOfOrNull { it.addedAt }).minOrNull() ?: row.entity.addedAt,
                     hidden = (preserved?.hidden ?: false) || losers.any { it.hidden && sameFolder(it.folder, row.entity.folder) },
                     lyricUri = row.entity.lyricUri ?: donatedLyric[row.entity.id],
+                    lyricOffsetMs = preserved?.lyricOffsetMs ?: row.entity.lyricOffsetMs,
+                    contentKey = preserved?.contentKey,
+                    syncId = preserved?.syncId,
                 )
             }
             tracks.chunked(200).forEach { trackDao.upsertAll(it) }

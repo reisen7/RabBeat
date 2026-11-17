@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -161,7 +162,7 @@ fun SearchScreen(
             BasicTextField(
                 value = query,
                 onValueChange = vm::update,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).wrapContentHeight(Alignment.CenterVertically),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = palette.label),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(accent.color),

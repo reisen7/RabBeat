@@ -38,4 +38,5 @@ interface PlaybackController {
     fun moveQueueItem(from: Int, to: Int)
     fun removeFromQueue(itemIndex: Int)
     fun clearUpcoming()
+    fun dropTracks(ids: Set<String>)
 }

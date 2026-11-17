@@ -19,24 +19,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      name: ${{ steps.version.outputs.name }}
+      code: ${{ steps.version.outputs.code }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Resolve version
         id: version
@@ -66,6 +60,25 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Restore signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.RABBEAT_KEYSTORE_BASE64 }}
@@ -93,15 +106,100 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease --no-daemon --stacktrace \
-            -PversionName="${{ steps.version.outputs.name }}" \
-            -PversionCode="${{ steps.version.outputs.code }}"
+            -PversionName="${{ needs.version.outputs.name }}" \
+            -PversionCode="${{ needs.version.outputs.code }}"
+
+      - name: Collect APK
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [[ ! -f "$apk" ]]; then
+            echo "::error::Signed APK not found; check the signing secrets."
+            ls -R app/build/outputs/apk || true
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$apk" "dist/RabBeat-${{ needs.version.outputs.name }}.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+  desktop:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Package portable zip and installer
+        shell: pwsh
+        run: |
+          .\gradlew.bat :desktopApp:packageWindows --no-daemon --stacktrace "-PversionName=${{ needs.version.outputs.name }}"
+          $zip = Get-ChildItem "desktopApp/build/compose/binaries/main/portable/RabBeat-*-windows-portable.zip" | Select-Object -First 1
+          if (-not $zip) { throw "portable zip was not produced" }
+          $setup = Get-ChildItem "desktopApp/build/compose/binaries/main/exe/RabBeat-*-windows-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "installer exe was not produced" }
+          if ($setup.Length -lt 1MB) { throw "installer looks empty: $($setup.Length) bytes" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = $archive.Entries | ForEach-Object { $_.FullName }
+          } finally {
+            $archive.Dispose()
+          }
+          if ($names -notcontains "RabBeat.exe") { throw "RabBeat.exe is missing from $($zip.Name)" }
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packages
+          path: |
+            desktopApp/build/compose/binaries/main/portable/*-windows-portable.zip
+            desktopApp/build/compose/binaries/main/exe/*-windows-setup.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [version, android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Generate changelog
+        env:
+          VERSION_TAG: ${{ needs.version.outputs.tag }}
+          VERSION_NAME: ${{ needs.version.outputs.name }}
         run: |
-          tag="${{ steps.version.outputs.tag }}"
-          name="${{ steps.version.outputs.name }}"
+          tag="$VERSION_TAG"
+          name="$VERSION_NAME"
           prev=$(git tag --sort=-creatordate | grep -vx "$tag" | head -1 || true)
-          # Pull this version's section out of doc/CHANGELOG.md when present.
           section=$(awk -v v="$name" '
             index($0, "## [" v "]") == 1 { found = 1; next }
             found && /^## / { exit }
@@ -121,6 +219,9 @@ jobs:
           {
             echo ""
             echo ""
+            echo "Windows 安装版：\`RabBeat-${name}-windows-setup.exe\`。"
+            echo "Windows 便携版：\`RabBeat-${name}-windows-portable.zip\`，解压后运行 \`RabBeat.exe\`。"
+            echo ""
             if [[ -z "$prev" ]]; then
               echo "**完整提交**: https://github.com/${{ github.repository }}/commits/$tag"
             else
@@ -129,89 +230,24 @@ jobs:
           } >> changelog.md
           cat changelog.md
 
-      - name: Collect artifacts
-        id: artifacts
+      - name: Checksums
         run: |
-          apk=app/build/outputs/apk/release/app-release.apk
-          if [[ ! -f "$apk" ]]; then
-            echo "::error::Signed APK not found; check the signing secrets."
-            ls -R app/build/outputs/apk || true
-            exit 1
-          fi
-          mkdir -p dist
-          out="dist/RabBeat-${{ steps.version.outputs.name }}.apk"
-          cp "$apk" "$out"
-          (cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256")
-          echo "apk=$out" >> "$GITHUB_OUTPUT"
+          cd dist
+          for f in *; do
+            case "$f" in
+              *.sha256) continue ;;
+            esac
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -l
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
+          tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: RabBeat ${{ steps.version.outputs.name }}
-          prerelease: ${{ steps.version.outputs.prerelease }}
+          name: RabBeat ${{ needs.version.outputs.name }}
+          prerelease: ${{ needs.version.outputs.prerelease }}
           body_path: changelog.md
-          files: |
-            ${{ steps.artifacts.outputs.apk }}
-            ${{ steps.artifacts.outputs.apk }}.sha256
-
-      - name: Remove keystore
-        if: always()
-        run: rm -f "$RUNNER_TEMP/release.jks"
-
-  desktop:
-    runs-on: windows-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Resolve version
-        id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            name="${INPUT_VERSION#v}"
-            tag="v$name"
-          else
-            tag="${GITHUB_REF_NAME}"
-            name="${tag#v}"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-
-      - name: Build desktop app image
-        run: |
-          ./gradlew :desktopApp:createDistributable --no-daemon --stacktrace
-
-      - name: Package portable zip
-        run: |
-          $app = "desktopApp/build/compose/binaries/main/app/RabBeat"
-          if (-not (Test-Path $app)) { Get-ChildItem -Recurse "desktopApp/build/compose/binaries" | Select-Object FullName; throw "app image not found" }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $zip = "dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip"
-          Compress-Archive -Path "$app/*" -DestinationPath $zip -Force
-          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
-          Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path $zip -Leaf)"
-
-      - name: Publish desktop artifact
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          files: |
-            dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip
-            dist/RabBeat-${{ steps.version.outputs.name }}-windows-portable.zip.sha256
+          fail_on_unmatched_files: true
+          files: dist/*

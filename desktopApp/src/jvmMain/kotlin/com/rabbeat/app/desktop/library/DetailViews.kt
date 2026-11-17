@@ -32,8 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,23 +107,18 @@ fun TrackListScreen(
 
 @Composable
 fun DetailIconCover(icon: ImageVector) {
-    val accent = LocalAccentPalette.current
+    val palette = LocalRabBeatPalette.current
     Box(
         Modifier
             .size(168.dp)
-            .shadow(12.dp, RoundedCornerShape(14.dp))
             .clip(RoundedCornerShape(14.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(accent.color, accent.color.copy(alpha = 0.45f)),
-                ),
-            ),
+            .background(palette.coverFill),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             icon,
             contentDescription = null,
-            tint = accent.onColor,
+            tint = palette.coverGlyph,
             modifier = Modifier.size(64.dp),
         )
     }
@@ -140,6 +133,7 @@ fun DetailHeroHeader(
     player: PlaybackController,
     onBack: () -> Unit,
     cover: @Composable () -> Unit,
+    showBackAndBadge: Boolean = true,
     extraActions: @Composable RowScope.() -> Unit = {},
 ) {
     val accent = LocalAccentPalette.current
@@ -149,14 +143,6 @@ fun DetailHeroHeader(
             Modifier
                 .fillMaxWidth()
                 .height(200.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            accent.color.copy(alpha = 0.16f),
-                            Color.Transparent,
-                        ),
-                    ),
-                )
                 .padding(horizontal = 28.dp, vertical = 16.dp),
         ) {
             Row(
@@ -166,41 +152,43 @@ fun DetailHeroHeader(
                 cover()
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.weight(1f).height(168.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(palette.fill)
-                                .hand()
-                                .clickable(onClick = onBack),
-                            contentAlignment = Alignment.Center,
+                    if (showBackAndBadge) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(14.dp),
-                            )
+                            Box(
+                                Modifier
+                                    .size(26.dp)
+                                    .clip(CircleShape)
+                                    .background(palette.fill)
+                                    .hand()
+                                    .clickable(onClick = onBack),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "返回",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .clip(CircleShape)
+                                    .background(accent.soft)
+                                    .padding(horizontal = 10.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    badge,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = accent.color,
+                                )
+                            }
                         }
-                        Box(
-                            Modifier
-                                .clip(CircleShape)
-                                .background(accent.soft)
-                                .padding(horizontal = 10.dp, vertical = 3.dp),
-                        ) {
-                            Text(
-                                badge,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = accent.color,
-                            )
-                        }
+                        Spacer(Modifier.height(10.dp))
                     }
-                    Spacer(Modifier.height(10.dp))
                     Text(
                         title,
                         fontSize = 26.sp,

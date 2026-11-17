@@ -4,7 +4,7 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
-import androidx.room.withTransaction
+import com.rabbeat.app.data.local.inTransaction
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.TrackQuerySql
@@ -179,7 +179,7 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun updateDurations(durations: Map<String, Long>) {
         // One transaction -> a single invalidation, not one emission per row.
-        database.withTransaction {
+        database.inTransaction {
             durations.forEach { (id, ms) -> trackDao.updateDuration(id, ms) }
         }
     }

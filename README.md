@@ -9,7 +9,7 @@
 
 ## 下载
 
-在 [Releases](https://github.com/reisen7/RabBeat/releases) 下载最新的 `RabBeat-<版本>.apk` 直接安装。
+在 [Releases](https://github.com/reisen7/RabBeat/releases) 下载最新的 `RabBeat-<版本>.apk` 直接安装。Windows 安装版是同页的 `RabBeat-<版本>-windows-setup.exe`，便携版是 `RabBeat-<版本>-windows-portable.zip`（解压后运行 `RabBeat.exe`）。
 
 ## 效果图
 
@@ -44,7 +44,10 @@
 ```bat
 gradlew.bat :app:assembleDebug
 gradlew.bat :app:testDebugUnitTest
+gradlew.bat :desktopApp:packageWindows "-PversionName=0.1.0"
 ```
+
+安装包在 `desktopApp\build\compose\binaries\main\exe\`，便携包在 `desktopApp\build\compose\binaries\main\portable\`。推送 `v*` tag，或在 Actions 里手动跑 Release 并填写版本号，会同时附上 APK、安装版和便携版。
 
 ## 许可证
 

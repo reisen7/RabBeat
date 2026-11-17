@@ -41,6 +41,9 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var cardOpacity: Float = load("cardOpacity", "0.3").toFloatOrNull() ?: 0.3f
         set(value) { field = value; save("cardOpacity", value.toString()) }
 
+    var bgBlur: Float = load("bgBlur", "22").toFloatOrNull() ?: 22f
+        set(value) { field = value; save("bgBlur", value.toString()) }
+
     var windowW: Int = load("windowW", "1280").toIntOrNull() ?: 1280
         set(value) { field = value; save("windowW", value.toString()) }
 
@@ -59,8 +62,28 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var cacheDir: String = load("cacheDir", "")
         set(value) { field = value; save("cacheDir", value) }
 
+    var convertDir: String = load("convertDir", "")
+        set(value) { field = value; save("convertDir", value) }
+
     fun cacheRoot(): File =
         if (cacheDir.isNotBlank()) File(cacheDir) else File(LibraryScanner.dataDir(), "cache")
+
+    /** Extracted covers, playlist images, and the custom background. Lives inside the cache root. */
+    fun artRoot(): File = File(cacheRoot(), "art")
+
+    /** Saved lyrics for tracks that have no sidecar next to the audio file. */
+    fun lyricRoot(): File = File(cacheRoot(), "lyrics")
+
+    /** Where decrypted ncm/qmc audio lands. Kept outside [cacheRoot] so cache cleanup never wipes library files. */
+    fun convertRoot(): File =
+        if (convertDir.isNotBlank()) File(convertDir) else File(LibraryScanner.dataDir(), "music")
+
+    /** Last time the sidebar order changed. Read from disk so every settings instance sees it. */
+    fun playlistOrderAt(): Long = load("playlistOrderAt", "0").toLongOrNull() ?: 0L
+
+    fun notePlaylistOrder() {
+        save("playlistOrderAt", System.currentTimeMillis().toString())
+    }
 
     private fun load(key: String, fallback: String): String =
         runCatching { Properties().apply { file.inputStream().use(::load) }.getProperty(key) }

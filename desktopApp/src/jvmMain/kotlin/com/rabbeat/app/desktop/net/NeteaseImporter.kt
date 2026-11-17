@@ -16,6 +16,7 @@ import com.rabbeat.app.data.remote.netease.NeteaseLinks
 import com.rabbeat.app.data.remote.netease.NeteaseMapper
 import com.rabbeat.app.domain.model.SourceStatus
 import com.rabbeat.app.domain.model.SourceType
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -82,7 +83,8 @@ class NeteaseImporter(private val db: RabBeatDatabase) {
                     entity.copy(
                         isFavorite = p.isFavorite, playCount = p.playCount,
                         lastPlayedAt = p.lastPlayedAt, addedAt = p.addedAt,
-                        downloadState = p.downloadState, lyricUri = p.lyricUri, hidden = p.hidden,
+                        downloadState = p.downloadState, lyricUri = p.lyricUri, lyricOffsetMs = p.lyricOffsetMs,
+                        hidden = p.hidden, contentKey = p.contentKey, syncId = p.syncId,
                     )
                 } ?: entity
                 refs += entity.id
@@ -105,9 +107,11 @@ class NeteaseImporter(private val db: RabBeatDatabase) {
                     createdAt = old?.createdAt ?: now,
                     updatedAt = now,
                     sortOrder = old?.sortOrder ?: ((db.playlistDao().minSortOrder() ?: 0) - 1),
-                    coverUri = old?.coverUri ?: detail.coverImgUrl,
+                    coverUri = old?.coverUri,
+                    syncId = old?.syncId,
                 ),
             )
+            if (old == null) DesktopSettings().notePlaylistOrder()
             db.playlistDao().deleteTracks(playlistTableId)
             db.playlistDao().upsertTracks(
                 refs.distinct().mapIndexed { i, trackId -> PlaylistTrackCrossRef(playlistTableId, trackId, i, now) },
@@ -115,6 +119,38 @@ class NeteaseImporter(private val db: RabBeatDatabase) {
             DesktopLog.i("Netease", "import '$finalName': imported=$imported matched=$matched skipped=$skipped")
             NeteaseImportResult(finalName, imported, matched, skipped)
         }
+
+    /**
+     * Removes NetEase library rows. Local files that a playlist matched stay.
+     * [onRemoving] runs before the rows disappear so the player can drop them.
+     */
+    suspend fun clearImported(
+        cacheRoot: File,
+        lyricRoot: File,
+        onRemoving: (Set<String>) -> Unit = {},
+    ): Int {
+        val tracks = db.trackDao().getBySource(NETEASE_SOURCE_ID)
+        if (tracks.isEmpty()) return 0
+        val ids = tracks.map { it.id }
+        onRemoving(ids.toSet())
+        withContext(Dispatchers.IO) {
+            ids.chunked(400).forEach { chunk ->
+                db.playlistDao().deleteRefs(chunk)
+                db.lyricLinkDao().deleteForTracks(chunk)
+                db.playHistoryDao().deleteForTracks(chunk)
+            }
+            db.trackDao().deleteBySource(NETEASE_SOURCE_ID)
+            db.albumDao().deleteBySource(NETEASE_SOURCE_ID)
+            db.artistDao().deleteBySource(NETEASE_SOURCE_ID)
+            ids.forEach { id ->
+                File(cacheRoot, "$id.audio").delete()
+                File(cacheRoot, "$id.part").delete()
+                val safe = id.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "track" }
+                File(lyricRoot, "$safe.lrc").delete()
+            }
+        }
+        return ids.size
+    }
 
     private suspend fun rebuildNeteaseCatalog() {
         val tracks = db.trackDao().getBySource(NETEASE_SOURCE_ID)

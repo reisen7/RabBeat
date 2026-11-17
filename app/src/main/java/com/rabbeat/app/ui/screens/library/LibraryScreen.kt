@@ -72,6 +72,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.rabbeat.app.R
 import com.rabbeat.app.data.local.LocalMediaScanner
+import com.rabbeat.app.data.local.NeteasePlaylistImporter
+import com.rabbeat.app.data.remote.netease.NeteaseMapper
 import com.rabbeat.app.domain.model.Album
 import com.rabbeat.app.domain.model.FolderSummary
 import com.rabbeat.app.domain.model.Artist
@@ -150,6 +152,7 @@ class LibraryViewModel @Inject constructor(
     private val favorites: ToggleFavoriteUseCase,
     private val downloads: DownloadRepository,
     private val scanner: LocalMediaScanner,
+    private val netease: NeteasePlaylistImporter,
 ) : ViewModel() {
     private val controls = MutableStateFlow(LibraryControls())
     private val query = combine(controls, network.online) { control, online ->
@@ -226,6 +229,11 @@ class LibraryViewModel @Inject constructor(
     fun hideFolder(path: String) {
         viewModelScope.launch {
             music.hide(music.trackIds(TrackQuery(folderPath = path, folderRecursive = true)))
+        }
+    }
+    fun deleteNetease(onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            onDone(netease.clearImported(onRemoving = player::dropTracks))
         }
     }
     fun importDevice(onDone: (Int) -> Unit) {
@@ -380,6 +388,7 @@ private fun LibraryBody(
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.Top,
         ) { page ->
             when (LibraryTab.entries[page]) {
                 LibraryTab.Tracks -> if (trackItems.itemCount == 0) {
@@ -626,6 +635,7 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
             items(folders, key = { it.path }) { group ->
                 var folderMenu by remember(group.path) { mutableStateOf(false) }
                 var confirmHide by remember(group.path) { mutableStateOf(false) }
+                var confirmDelete by remember(group.path) { mutableStateOf(false) }
                 Column {
                     Row(
                         Modifier
@@ -663,6 +673,12 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
                                     text = { Text(stringResource(R.string.menu_hide_folder)) },
                                     onClick = { folderMenu = false; confirmHide = true },
                                 )
+                                if (group.path == NeteaseMapper.FOLDER) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.menu_delete_netease_folder)) },
+                                        onClick = { folderMenu = false; confirmDelete = true },
+                                    )
+                                }
                             }
                         }
                     }
@@ -692,6 +708,34 @@ private fun FolderList(folders: List<FolderSummary>, vm: LibraryViewModel) {
                             },
                             dismissButton = {
                                 TextButton(onClick = { confirmHide = false }) {
+                                    Text(stringResource(R.string.action_cancel))
+                                }
+                            },
+                        )
+                    }
+                    if (confirmDelete) {
+                        AlertDialog(
+                            onDismissRequest = { confirmDelete = false },
+                            title = { Text(stringResource(R.string.delete_netease_folder_title)) },
+                            text = { Text(stringResource(R.string.delete_netease_folder_body)) },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    confirmDelete = false
+                                    vm.deleteNetease { count ->
+                                        Toast.makeText(
+                                            context,
+                                            if (count == 0) {
+                                                context.getString(R.string.delete_netease_folder_empty)
+                                            } else {
+                                                context.getString(R.string.delete_netease_folder_done, count)
+                                            },
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }) { Text(stringResource(R.string.action_delete)) }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { confirmDelete = false }) {
                                     Text(stringResource(R.string.action_cancel))
                                 }
                             },

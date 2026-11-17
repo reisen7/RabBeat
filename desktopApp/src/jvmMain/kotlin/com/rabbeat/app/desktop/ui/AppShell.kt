@@ -1,18 +1,28 @@
 package com.rabbeat.app.desktop.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.style.TextOverflow
+import com.rabbeat.app.ui.theme.LocalRabBeatPalette
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.MaterialTheme
@@ -23,10 +33,16 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
@@ -50,6 +66,7 @@ import com.rabbeat.app.domain.model.TrackQuery
 import com.rabbeat.app.domain.model.TrackSort
 import com.rabbeat.app.ui.components.LocalCardOpacity
 import com.rabbeat.app.ui.components.LocalHasBackgroundImage
+import com.rabbeat.app.desktop.sys.relocateCacheExtras
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -66,6 +83,41 @@ private fun debugStartRoute(): DesktopRoute = when (debugStartProp()) {
 }
 
 private fun debugAutoplay(): Boolean = System.getProperty("rabbeat.autoplay") == "true"
+
+val LocalBriefNotice = compositionLocalOf<(String) -> Unit> { {} }
+
+/**
+ * One-shot background blur via Skia (CLAMP tile mode replicates edge pixels, so
+ * no halo and no need to scale the image up). For sigma > 12 the bitmap is
+ * blurred at half resolution — indistinguishable once upscaled by Crop.
+ */
+private fun blurBitmap(src: androidx.compose.ui.graphics.ImageBitmap, blurDp: Float): androidx.compose.ui.graphics.ImageBitmap {
+    val sigma = blurDp
+    if (sigma <= 0.5f) return src
+    return runCatching {
+        val factor = if (sigma > 12f) 2 else 1
+        val w = (src.width / factor).coerceAtLeast(1)
+        val h = (src.height / factor).coerceAtLeast(1)
+        val img = org.jetbrains.skia.Image.makeFromBitmap(src.asSkiaBitmap())
+        val out = org.jetbrains.skia.Bitmap().apply {
+            allocPixels(org.jetbrains.skia.ImageInfo.makeN32Premul(w, h))
+        }
+        val paint = org.jetbrains.skia.Paint().apply {
+            imageFilter = org.jetbrains.skia.ImageFilter.makeBlur(
+                sigma / factor,
+                sigma / factor,
+                org.jetbrains.skia.FilterTileMode.CLAMP,
+            )
+        }
+        org.jetbrains.skia.Canvas(out).drawImageRect(
+            img,
+            org.jetbrains.skia.Rect.makeWH(src.width.toFloat(), src.height.toFloat()),
+            org.jetbrains.skia.Rect.makeWH(w.toFloat(), h.toFloat()),
+            paint,
+        )
+        out.asComposeImageBitmap()
+    }.getOrDefault(src)
+}
 
 
 private fun TrackEntity.folderPathOf(): String = folder?.trim()?.takeIf { it.isNotEmpty() } ?: "本地"
@@ -97,7 +149,7 @@ fun AppShell(
     var isPlayerOpen by playerOpen
     var isQueueOpen by queueOpen
     val history = remember { NavHistory(debugStartRoute()) }
-    val scanner = remember { LibraryScanner(db) }
+    val scanner = remember { LibraryScanner(db, settings) }
     val liked = remember { LikedPlaylist(db.playlistDao(), db.trackDao()) }
 
     val triggerImport: () -> Unit = {
@@ -111,6 +163,8 @@ fun AppShell(
     }
 
     LaunchedEffect(Unit) {
+        relocateCacheExtras(db, settings)
+        onAppearanceChanged()
         scanner.prune()
         liked.ensure()
     }
@@ -140,20 +194,24 @@ fun AppShell(
     }
 
     val bgPath = remember(appearanceTick) { settings.bgImage }
-    val bgBitmap = remember(bgPath) {
-        bgPath.takeIf { it.isNotBlank() }
+    val bgBlur = remember(appearanceTick) { settings.bgBlur }
+    val bgBitmap by produceState<ImageBitmap?>(null, bgPath, bgBlur) {
+        value = bgPath.takeIf { it.isNotBlank() }
             ?.let { runCatching { androidx.compose.ui.res.loadImageBitmap(File(it).inputStream()) }.getOrNull() }
+            ?.let { blurBitmap(it, bgBlur) }
     }
 
+    var briefNotice by remember { mutableStateOf<Pair<Long, String>?>(null) }
     CompositionLocalProvider(
         LocalLikedPlaylist provides liked,
         LocalHasBackgroundImage provides (bgBitmap != null),
         LocalCardOpacity provides settings.cardOpacity,
+        LocalBriefNotice provides { text -> briefNotice = System.nanoTime() to text },
     ) {
         Box(Modifier.fillMaxSize()) {
-            if (bgBitmap != null) {
+            bgBitmap?.let { bmp ->
                 Image(
-                    bitmap = bgBitmap,
+                    bitmap = bmp,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
@@ -165,7 +223,7 @@ fun AppShell(
                 )
             }
 
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().padding(bottom = 80.dp)) {
                 Row(Modifier.weight(1f).fillMaxWidth()) {
                     Sidebar(
                         db = db,
@@ -187,8 +245,6 @@ fun AppShell(
                                     history.push(DesktopRoute.Search)
                                 }
                             },
-                            scanText = scanText,
-                            onImport = triggerImport,
                             keys = keys,
                         )
                         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -258,7 +314,7 @@ fun AppShell(
                                         title = "最常播放",
                                         badge = "排行",
                                         subtitle = "按累计播放次数排序",
-                                        fallbackIcon = Icons.AutoMirrored.Filled.TrendingUp,
+                                        fallbackIcon = Icons.Default.Equalizer,
                                         tracks = top,
                                         currentTrackId = state.currentTrack?.id,
                                         isPlaying = state.isPlaying,
@@ -336,16 +392,43 @@ fun AppShell(
                                     activeThemeMode = activeThemeMode,
                                     scanner = scanner,
                                     db = db,
+                                    player = player,
                                     bgAspect = bgAspect,
                                     onThemeChange = onThemeChanged,
                                     onAppearanceChange = onAppearanceChanged,
                                     onOpenHidden = { history.push(DesktopRoute.HiddenSongs) },
+                                    scanText = scanText,
+                                    onImport = triggerImport,
                                     onBack = { history.back() },
                                 )
                             }
                         }
                     }
                 }
+            }
+
+            // Full-height now-playing sheet underneath the player bar so its backdrop
+            // spans seamlessly behind the bar without a 80dp seam or snap cut.
+            AnimatedVisibility(
+                visible = isPlayerOpen,
+                enter = slideInVertically(
+                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    initialOffsetY = { it },
+                ),
+                exit = slideOutVertically(
+                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    targetOffsetY = { it },
+                ),
+            ) {
+                NowPlayingPage(
+                    db = db,
+                    player = player,
+                    state = state,
+                    onCollapse = { isPlayerOpen = false },
+                )
+            }
+
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                 PlayerBar(
                     db = db,
                     player = player,
@@ -358,23 +441,34 @@ fun AppShell(
             }
 
             Box(Modifier.fillMaxSize().padding(bottom = 80.dp)) {
-                AnimatedVisibility(
-                    visible = isPlayerOpen,
-                    enter = slideInVertically(initialOffsetY = { it }),
-                    exit = slideOutVertically(targetOffsetY = { it }),
-                ) {
-                    NowPlayingPage(
-                        db = db,
-                        player = player,
-                        state = state,
-                        onCollapse = { isPlayerOpen = false },
-                    )
-                }
                 QueueDrawer(
                     state = state,
                     player = player,
                     open = isQueueOpen,
                     onClose = { isQueueOpen = false },
+                )
+            }
+
+            val notice = briefNotice
+            if (notice != null) {
+                LaunchedEffect(notice) {
+                    delay(1600)
+                    briefNotice = null
+                }
+                val palette = LocalRabBeatPalette.current
+                Text(
+                    notice.second,
+                    color = palette.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 96.dp)
+                        .shadow(12.dp, RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(palette.elevated)
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
         }

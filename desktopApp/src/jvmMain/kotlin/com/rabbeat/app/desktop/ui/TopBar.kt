@@ -23,11 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -55,8 +53,6 @@ fun TopBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onSearchSubmit: () -> Unit,
-    scanText: String?,
-    onImport: () -> Unit,
     keys: ShellKeys,
     modifier: Modifier = Modifier,
 ) {
@@ -107,7 +103,7 @@ fun TopBar(
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Box(Modifier.weight(1f)) {
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
                             Text(
                                 "搜索本地音乐",
@@ -129,15 +125,6 @@ fun TopBar(
             },
         )
         Spacer(Modifier.weight(1f))
-        scanText?.let {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(12.dp))
-        }
-        OutlinedButton(onClick = onImport, shape = CircleShape, modifier = Modifier.hand()) {
-            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("导入文件夹")
-        }
     }
 }
 

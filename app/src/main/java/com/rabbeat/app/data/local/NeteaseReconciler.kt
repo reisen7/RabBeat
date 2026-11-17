@@ -1,6 +1,5 @@
 package com.rabbeat.app.data.local
 
-import androidx.room.withTransaction
 import com.rabbeat.app.data.remote.netease.NETEASE_SOURCE_ID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -12,10 +11,10 @@ class NeteaseReconciler @Inject constructor(
     private val database: RabBeatDatabase,
 ) {
     suspend fun reconcile() = withContext(Dispatchers.IO) {
-        database.withTransaction {
+        database.inTransaction {
             val trackDao = database.trackDao()
             val netease = trackDao.getBySource(NETEASE_SOURCE_ID)
-            if (netease.isEmpty()) return@withTransaction
+            if (netease.isEmpty()) return@inTransaction
             val locals = trackDao.getOtherSources(NETEASE_SOURCE_ID)
             val candidates = locals.map { it.toCandidate() }
             val dead = mutableListOf<String>()

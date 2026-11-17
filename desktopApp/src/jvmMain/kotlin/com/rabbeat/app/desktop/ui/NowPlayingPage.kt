@@ -5,15 +5,20 @@ import com.rabbeat.app.desktop.playlist.*
 import com.rabbeat.app.desktop.net.*
 import com.rabbeat.app.desktop.sys.*
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -86,6 +91,8 @@ fun NowPlayingPage(
     val palette = LocalRabBeatPalette.current
     val scope = rememberCoroutineScope()
     var lyricReload by remember { mutableStateOf(0) }
+    var matchingLyric by remember(track?.id) { mutableStateOf(false) }
+    var lyricHint by remember(track?.id) { mutableStateOf<String?>(null) }
     val lyrics = remember(track?.id, lyricReload) {
         track?.let { LyricLoader.loadFor(it) } ?: emptyList()
     }
@@ -151,7 +158,7 @@ fun NowPlayingPage(
         val compact = maxWidth < 1100.dp
         val pageHeight = maxHeight
         Row(
-            Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 56.dp, bottom = 28.dp),
+            Modifier.fillMaxSize().padding(start = 48.dp, end = 48.dp, top = 56.dp, bottom = 108.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(0.45f).fillMaxHeight(), contentAlignment = Alignment.Center) {
@@ -191,19 +198,43 @@ fun NowPlayingPage(
                             if (track != null) {
                                 TextButton(
                                     onClick = {
+                                        val current = track
+                                        if (matchingLyric) return@TextButton
+                                        matchingLyric = true
+                                        lyricHint = null
                                         scope.launch {
-                                            NeteaseClient.fetchLrc(track.title, track.artist)?.let { lrc ->
-                                                runCatching {
-                                                    val audio = java.io.File(java.net.URI(track.uri))
-                                                    java.io.File(audio.parentFile, audio.nameWithoutExtension + ".lrc").writeText(lrc)
+                                            val songId = NeteaseClient.songIdOf(current.id, current.sourceId, current.remoteId)
+                                            val lrc = runCatching {
+                                                NeteaseClient.fetchLrc(current.title, current.artist, songId)
+                                            }.getOrNull()
+                                            when {
+                                                lrc.isNullOrBlank() -> {
+                                                    lyricHint = "没有匹配到歌词"
+                                                    DesktopLog.w("Lyric", "no lyric for '${current.title}' id=${current.id}")
+                                                }
+                                                LyricLoader.save(current, lrc) == null -> {
+                                                    lyricHint = "歌词保存失败"
+                                                    DesktopLog.w("Lyric", "save failed for '${current.title}' id=${current.id}")
+                                                }
+                                                else -> {
+                                                    DesktopLog.i("Lyric", "saved lyric for '${current.title}' id=${current.id}")
                                                     lyricReload++
                                                 }
                                             }
+                                            matchingLyric = false
                                         }
                                     },
+                                    enabled = !matchingLyric,
                                     modifier = Modifier.hand(),
                                 ) {
-                                    Text("在线匹配歌词")
+                                    Text(if (matchingLyric) "正在匹配…" else "在线匹配歌词")
+                                }
+                                if (lyricHint != null) {
+                                    Text(
+                                        lyricHint!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = palette.secondaryLabel,
+                                    )
                                 }
                             }
                         }
@@ -213,7 +244,9 @@ fun NowPlayingPage(
                     LaunchedEffect(lyricIndex) {
                         if (lyricIndex >= 0) listState.animateScrollToItem(lyricIndex)
                     }
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                    val lyricHover = remember { MutableInteractionSource() }
+                    val showOffsetBar by lyricHover.collectIsHoveredAsState()
+                    Box(Modifier.weight(1f).fillMaxWidth().hoverable(lyricHover)) {
                         LazyColumn(
                             state = listState,
                             contentPadding = PaddingValues(
@@ -256,28 +289,41 @@ fun NowPlayingPage(
                                 )
                             }
                         }
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 6.dp),
-                    ) {
-                        TextButton(
-                            onClick = {
-                                if (track != null) scope.launch { db.trackDao().updateLyricOffset(track.id, offsetMs - 500) }
-                            },
-                            modifier = Modifier.hand(),
-                        ) { Text("-0.5s") }
-                        Text(
-                            "偏移 ${"%.1f".format(offsetMs / 1000f)}s",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = palette.secondaryLabel,
-                        )
-                        TextButton(
-                            onClick = {
-                                if (track != null) scope.launch { db.trackDao().updateLyricOffset(track.id, offsetMs + 500) }
-                            },
-                            modifier = Modifier.hand(),
-                        ) { Text("+0.5s") }
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = showOffsetBar,
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(180)),
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 6.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(
+                                        (if (palette.isDark) Color.Black else Color.White).copy(alpha = 0.42f),
+                                    )
+                                    .border(1.dp, palette.label.copy(alpha = 0.12f), CircleShape)
+                                    .padding(horizontal = 4.dp),
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        if (track != null) scope.launch { db.trackDao().updateLyricOffset(track.id, offsetMs - 500) }
+                                    },
+                                    modifier = Modifier.hand(),
+                                ) { Text("-0.5s") }
+                                Text(
+                                    "偏移 ${"%.1f".format(offsetMs / 1000f)}s",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                    color = palette.secondaryLabel,
+                                )
+                                TextButton(
+                                    onClick = {
+                                        if (track != null) scope.launch { db.trackDao().updateLyricOffset(track.id, offsetMs + 500) }
+                                    },
+                                    modifier = Modifier.hand(),
+                                ) { Text("+0.5s") }
+                            }
+                        }
                     }
                 }
             }
@@ -287,8 +333,8 @@ fun NowPlayingPage(
 
 @Composable
 private fun VinylDisc(track: Track?, playing: Boolean, discSize: Dp, artSize: Dp) {
-    val angle = remember(track?.id) { Animatable(0f) }
-    LaunchedEffect(playing) {
+    val angle = remember { Animatable(0f) }
+    LaunchedEffect(playing, track?.id) {
         if (!playing) {
             angle.stop()
             return@LaunchedEffect
@@ -327,13 +373,6 @@ private fun VinylDisc(track: Track?, playing: Boolean, discSize: Dp, artSize: Dp
             title = track?.title ?: "?",
             modifier = Modifier.size(artSize).clip(CircleShape),
             cornerRadius = artSize / 2,
-        )
-        Box(
-            Modifier
-                .size(artSize * 0.18f)
-                .clip(CircleShape)
-                .background(Color(0xFF141418))
-                .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape),
         )
     }
 }

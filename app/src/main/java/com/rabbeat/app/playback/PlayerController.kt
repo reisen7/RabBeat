@@ -291,6 +291,31 @@ class PlayerController @Inject constructor(
         scope.launch { persist() }
     }
 
+    override fun dropTracks(ids: Set<String>) {
+        if (ids.isEmpty() || queue.none { it.id in ids }) return
+        val wasPlaying = player?.isPlaying == true
+        val removingCurrent = queue.getOrNull(index)?.id in ids
+        val removedBefore = if (index > 0) queue.take(index).count { it.id in ids } else 0
+        queue = queue.filter { it.id !in ids }
+        if (queue.isEmpty()) {
+            index = -1
+            pendingSeek = 0L
+            player?.stop()
+            player?.clearMediaItems()
+            publish(false, 0L)
+        } else {
+            if (removingCurrent) {
+                index = index.coerceIn(0, queue.lastIndex)
+                pendingSeek = 0L
+            } else {
+                index = (index - removedBefore).coerceIn(0, queue.lastIndex)
+                pendingSeek = player?.currentPosition ?: pendingSeek
+            }
+            applyToPlayer(wasPlaying)
+        }
+        scope.launch { persist() }
+    }
+
     override fun clearUpcoming() {
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)

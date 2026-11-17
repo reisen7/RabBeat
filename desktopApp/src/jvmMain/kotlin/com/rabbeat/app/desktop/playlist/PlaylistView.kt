@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -58,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,11 +75,15 @@ import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.entity.PlaylistEntity
 import com.rabbeat.app.data.local.entity.PlaylistTrackCrossRef
 import com.rabbeat.app.data.local.mapper.toDomain
+import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.desktop.library.DetailHeroHeader
-import com.rabbeat.app.desktop.library.LibraryScanner
+import com.rabbeat.app.desktop.library.LocalLikedPlaylist
+import com.rabbeat.app.desktop.library.PlaylistPickerDialog
+import com.rabbeat.app.desktop.sys.DesktopSettings
 import com.rabbeat.app.desktop.library.buildMetaLine
 import com.rabbeat.app.desktop.net.NeteaseImporter
 import com.rabbeat.app.desktop.ui.ImageCropDialog
+import com.rabbeat.app.desktop.ui.LocalBriefNotice
 import com.rabbeat.app.desktop.ui.TrackTable
 import com.rabbeat.app.desktop.ui.hand
 import com.rabbeat.app.domain.model.Track
@@ -88,6 +94,8 @@ import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.PlaylistCover
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.util.UUID
 import com.rabbeat.app.desktop.sys.pickFile
@@ -294,7 +302,7 @@ fun PlaylistListView(
                 }
                 VerticalScrollbar(
                     adapter = rememberScrollbarAdapter(gridState),
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
                 )
             }
         }
@@ -334,6 +342,7 @@ fun PlaylistListView(
                                     updatedAt = System.currentTimeMillis(),
                                 ),
                             )
+                            DesktopSettings().notePlaylistOrder()
                         }
                     },
                 ) { Text("创建") }
@@ -424,45 +433,96 @@ fun PlaylistDetailView(
         playlist = db.playlistDao().get(playlistId)
     }
     val scope = rememberCoroutineScope()
+    val saveMutex = remember(playlistId) { Mutex() }
     val byId = remember(all) { all.associateBy { it.id } }
-    val tracks = remember(refs, byId) { refs.mapNotNull { byId[it.trackId] } }
+    val orderState = remember(playlistId) { mutableStateOf<List<String>?>(null) }
+    val draggingState = remember(playlistId) { mutableStateOf(false) }
+    val localIds = orderState.value
+    val dragging = draggingState.value
+    val baseTracks = remember(refs, byId) { refs.mapNotNull { byId[it.trackId] } }
+    val tracks = remember(baseTracks, localIds) {
+        val ids = localIds
+        if (ids == null) baseTracks else ids.mapNotNull { id -> baseTracks.find { it.id == id } }
+    }
+    LaunchedEffect(refs, byId, dragging) {
+        if (draggingState.value || orderState.value == null) return@LaunchedEffect
+        val visible = refs.map { it.trackId }.filter { it in byId }
+        if (visible == orderState.value) orderState.value = null
+    }
+    val tracksState = rememberUpdatedState(tracks)
+    fun moveTrack(from: Int, to: Int) {
+        val ids = (orderState.value ?: tracksState.value.map { it.id }).toMutableList()
+        if (from !in ids.indices || to !in ids.indices || from == to) return
+        ids.add(to, ids.removeAt(from))
+        orderState.value = ids.toList()
+    }
+    fun persistOrder(ids: List<String>) {
+        scope.launch { saveMutex.withLock { savePlaylistOrder(db, playlistId, ids) } }
+    }
     var renaming by remember { mutableStateOf(false) }
     var coverCropSource by remember { mutableStateOf<File?>(null) }
+    var selecting by remember(playlistId) { mutableStateOf(false) }
+    var selected by remember(playlistId) { mutableStateOf(emptySet<String>()) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var pickingPlaylist by remember { mutableStateOf(false) }
+    val notify = LocalBriefNotice.current
     val accent = LocalAccentPalette.current
+    val palette = LocalRabBeatPalette.current
+    val liked = LocalLikedPlaylist.current
+    LaunchedEffect(tracks) {
+        val ids = tracks.mapTo(HashSet()) { it.id }
+        selected = selected.filterTo(HashSet()) { it in ids }
+    }
+    fun exitSelection() {
+        selecting = false
+        selected = emptySet()
+    }
 
+    Column(Modifier.fillMaxSize()) {
     TrackTable(
         db = db,
         player = player,
         tracks = tracks,
         currentTrackId = currentTrackId,
         isPlaying = isPlaying,
+        modifier = Modifier.weight(1f),
         inPlaylistId = playlistId,
         onOpenAlbum = onOpenAlbum,
-        extraMenuFor = { i, track ->
+        selecting = selecting,
+        selectedIds = selected,
+        onToggleSelected = { id ->
+            selected = if (id in selected) selected - id else selected + id
+        },
+        onReorder = if (selecting) null else { from, to -> moveTrack(from, to) },
+        onReorderStart = {
+            draggingState.value = true
+            if (orderState.value == null) orderState.value = tracksState.value.map { it.id }
+        },
+        onReorderFinished = {
+            draggingState.value = false
+            orderState.value?.let { persistOrder(it) }
+        },
+        extraMenuFor = { i, _ ->
             buildList {
                 if (i > 0) {
                     add(ContextMenuItem("上移") {
-                        val other = tracks[i - 1]
-                        scope.launch {
-                            db.playlistDao().setTrackPosition(playlistId, track.id, i - 1)
-                            db.playlistDao().setTrackPosition(playlistId, other.id, i)
-                        }
+                        moveTrack(i, i - 1)
+                        orderState.value?.let { persistOrder(it) }
                     })
                 }
                 if (i < tracks.lastIndex) {
                     add(ContextMenuItem("下移") {
-                        val other = tracks[i + 1]
-                        scope.launch {
-                            db.playlistDao().setTrackPosition(playlistId, track.id, i + 1)
-                            db.playlistDao().setTrackPosition(playlistId, other.id, i)
-                        }
+                        moveTrack(i, i + 1)
+                        orderState.value?.let { persistOrder(it) }
                     })
                 }
             }
         },
         emptyMessage = "歌单还是空的，右键歌曲可加入歌单",
         headerContent = {
-            val autoCover = tracks.firstOrNull { !it.artworkUri.isNullOrBlank() }?.artworkUri
+            val autoCover = refs
+                .sortedBy { it.position }
+                .firstNotNullOfOrNull { ref -> byId[ref.trackId]?.artworkUri?.takeIf { it.isNotBlank() } }
             val uiPlaylist = UserPlaylist(
                 id = playlistId,
                 name = playlist?.name ?: "歌单",
@@ -475,21 +535,57 @@ fun PlaylistDetailView(
             DetailHeroHeader(
                 badge = if (playlist?.isSystem == true) "我喜欢" else "歌单",
                 title = playlist?.name ?: "歌单",
-                metaLine = buildMetaLine(null, tracks),
+                metaLine = if (selecting) "已选择 ${selected.size} 首" else buildMetaLine(null, tracks),
                 tracks = tracks,
                 player = player,
                 onBack = onBack,
+                showBackAndBadge = false,
                 cover = {
                     val shape = RoundedCornerShape(14.dp)
-                    Box(Modifier.size(168.dp).shadow(12.dp, shape).clip(shape)) {
+                    val plain = uiPlaylist.displayCoverUri == null
+                    val frame = if (plain) {
+                        Modifier.size(168.dp).clip(shape)
+                    } else {
+                        Modifier.size(168.dp).shadow(12.dp, shape).clip(shape)
+                    }
+                    Box(frame) {
                         if (uiPlaylist.displayCoverUri != null) {
                             Artwork(uiPlaylist.displayCoverUri, uiPlaylist.name, Modifier.fillMaxSize(), 14.dp)
                         } else {
-                            PlaylistCover(uiPlaylist, size = 168.dp, modifier = Modifier.fillMaxSize())
+                            PlaylistCover(uiPlaylist, size = 168.dp, modifier = Modifier.fillMaxSize(), corner = 14.dp)
                         }
                     }
                 },
                 extraActions = {
+                    if (selecting) {
+                        val allPicked = tracks.isNotEmpty() && tracks.all { it.id in selected }
+                        OutlinedButton(
+                            onClick = {
+                                selected = if (allPicked) emptySet() else tracks.mapTo(HashSet()) { it.id }
+                            },
+                            enabled = tracks.isNotEmpty(),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.height(38.dp).hand(),
+                        ) { Text(if (allPicked) "取消全选" else "全选") }
+                        OutlinedButton(
+                            onClick = { exitSelection() },
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.height(38.dp).hand(),
+                        ) { Text("完成") }
+                    } else {
+                    OutlinedButton(
+                        onClick = { selecting = true },
+                        enabled = tracks.isNotEmpty(),
+                        shape = CircleShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.height(38.dp).hand(),
+                    ) {
+                        Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("多选")
+                    }
                     HeroCircleAction(Icons.Default.Image, "设置封面") {
                         scope.launch {
                             pickFile("选择图片", "jpg", "jpeg", "png", "webp")?.let { file ->
@@ -503,14 +599,108 @@ fun PlaylistDetailView(
                             scope.launch {
                                 db.playlistDao().deleteTracks(playlistId)
                                 db.playlistDao().delete(playlistId)
+                                DesktopSettings().notePlaylistOrder()
                                 onBack()
                             }
                         }
+                    }
                     }
                 },
             )
         },
     )
+        if (selecting) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(palette.separator),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    "已选择 ${selected.size} 首",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.secondaryLabel,
+                )
+                Spacer(Modifier.weight(1f))
+                OutlinedButton(
+                    onClick = {
+                        val picked = tracks.filter { it.id in selected }.map { it.toDomain(null) }
+                        if (picked.isNotEmpty()) player.playNext(picked)
+                        exitSelection()
+                    },
+                    enabled = selected.isNotEmpty(),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.height(36.dp).hand(),
+                ) { Text("下一首播放") }
+                OutlinedButton(
+                    onClick = { pickingPlaylist = true },
+                    enabled = selected.isNotEmpty(),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.height(36.dp).hand(),
+                ) { Text("添加到歌单") }
+                OutlinedButton(
+                    onClick = { confirmRemove = true },
+                    enabled = selected.isNotEmpty(),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF3B30)),
+                    modifier = Modifier.height(36.dp).hand(),
+                ) { Text("从歌单移除") }
+            }
+        }
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("从歌单删除 ${selected.size} 首歌？", fontWeight = FontWeight.SemiBold) },
+            text = { Text("歌曲文件不会被删除") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ids = selected.toList()
+                        confirmRemove = false
+                        exitSelection()
+                        scope.launch {
+                            ids.chunked(400).forEach { db.playlistDao().removeTracksIn(playlistId, it) }
+                            db.playlistDao().touch(playlistId, System.currentTimeMillis())
+                            if (playlistId == LikedPlaylist.ID) {
+                                ids.forEach { id ->
+                                    if (liked != null) liked.onRemoved(id) else db.trackDao().setFavorite(id, false)
+                                }
+                            }
+                            val gone = ids.toSet()
+                            orderState.value = orderState.value?.filter { it !in gone }
+                        }
+                    },
+                    modifier = Modifier.hand(),
+                ) { Text("删除", color = Color(0xFFFF3B30)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemove = false }, modifier = Modifier.hand()) { Text("取消") }
+            },
+        )
+    }
+    if (pickingPlaylist) {
+        PlaylistPickerDialog(
+            db = db,
+            excludeId = playlistId,
+            onDismiss = { pickingPlaylist = false },
+            onPick = { target ->
+                val picked = tracks.filter { it.id in selected }.map { it.toDomain(null) }
+                pickingPlaylist = false
+                exitSelection()
+                scope.launch { notify(addToPlaylist(db, target, picked).notice()) }
+            },
+        )
+    }
 
     coverCropSource?.let { src ->
         ImageCropDialog(
@@ -524,11 +714,12 @@ fun PlaylistDetailView(
                 val prev = playlist?.coverUri
                 scope.launch {
                     db.playlistDao().setCover(playlistId, out.toURI().toString())
+                    db.playlistDao().touch(playlistId, System.currentTimeMillis())
                     prev?.let {
                         runCatching {
                             val f = File(java.net.URI(it))
                             if (f.absoluteFile.parentFile ==
-                                File(LibraryScanner.dataDir(), "art").absoluteFile
+                                DesktopSettings().artRoot().absoluteFile
                             ) {
                                 f.delete()
                             }
@@ -599,17 +790,46 @@ private fun HeroCircleAction(icon: ImageVector, desc: String, onClick: () -> Uni
 }
 
 
-suspend fun addToPlaylist(db: RabBeatDatabase, playlistId: String, tracks: List<Track>) {
-    val existing = db.playlistDao().trackCount(playlistId)
+private suspend fun savePlaylistOrder(db: RabBeatDatabase, playlistId: String, orderedVisibleIds: List<String>) {
+    val existing = db.playlistDao().refs(playlistId).map { it.trackId }
+    val existingSet = existing.toSet()
+    val given = orderedVisibleIds.distinct().filter { it in existingSet }
+    val givenSet = given.toSet()
+    (given + existing.filter { it !in givenSet }).forEachIndexed { index, id ->
+        db.playlistDao().setTrackPosition(playlistId, id, index)
+    }
+    db.playlistDao().touch(playlistId, System.currentTimeMillis())
+}
+
+data class PlaylistAddResult(val added: Int, val already: Int)
+
+fun PlaylistAddResult.notice(): String = when {
+    added > 0 && already == 0 -> if (added == 1) "已添加到歌单" else "已添加 $added 首到歌单"
+    added == 0 -> if (already <= 1) "这首歌已经在歌单里了" else "这 $already 首已经在歌单里了"
+    else -> "已添加 $added 首，$already 首已经在歌单里"
+}
+
+suspend fun addToPlaylist(db: RabBeatDatabase, playlistId: String, tracks: List<Track>): PlaylistAddResult {
+    val requested = tracks.distinctBy { it.id }
+    val have = db.playlistDao().refs(playlistId).map { it.trackId }.toSet()
+    val fresh = requested.filter { it.id !in have }
+    val already = requested.size - fresh.size
+    if (fresh.isEmpty()) return PlaylistAddResult(0, already)
+    val now = System.currentTimeMillis()
+    db.playlistDao().shift(playlistId, fresh.size)
     db.playlistDao().upsertTracks(
-        tracks.mapIndexed { i, t ->
+        fresh.mapIndexed { i, t ->
             PlaylistTrackCrossRef(
                 playlistId = playlistId,
                 trackId = t.id,
-                position = existing + i,
-                addedAt = System.currentTimeMillis(),
+                position = i,
+                addedAt = now,
             )
         },
     )
-    db.playlistDao().touch(playlistId, System.currentTimeMillis())
+    if (playlistId == com.rabbeat.app.data.local.LikedPlaylist.ID) {
+        fresh.chunked(400).forEach { chunk -> db.trackDao().markFavorites(chunk.map { it.id }) }
+    }
+    db.playlistDao().touch(playlistId, now)
+    return PlaylistAddResult(fresh.size, already)
 }

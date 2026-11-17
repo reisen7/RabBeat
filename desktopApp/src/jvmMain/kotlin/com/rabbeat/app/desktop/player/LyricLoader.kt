@@ -8,17 +8,37 @@ import java.io.File
 import java.net.URI
 import java.util.regex.Pattern
 
-/** Sidecar `.lrc` reader — looks for `<audio basename>.lrc` next to the file. */
+/** Sidecar `.lrc` next to a local file, or `<cache>/lyrics/<trackId>.lrc` for remote tracks. */
 object LyricLoader {
     private val LINE = Pattern.compile("\\[(\\d+):(\\d+(?:\\.\\d+)?)](.*)")
 
     data class LrcLine(val atMs: Long, val text: String)
 
     fun loadFor(track: com.rabbeat.app.domain.model.Track): List<LrcLine> {
-        val audio = runCatching { File(URI(track.uri)) }.getOrNull() ?: return emptyList()
-        val lrc = File(audio.parentFile, audio.nameWithoutExtension + ".lrc")
-        if (!lrc.isFile) return emptyList()
-        return parse(lrc.readText())
+        val file = sidecar(track)?.takeIf { it.isFile } ?: storedFile(track.id).takeIf { it.isFile } ?: return emptyList()
+        return runCatching { parse(file.readText(Charsets.UTF_8)) }.getOrDefault(emptyList())
+    }
+
+    /** Writes lyrics where [loadFor] will find them. Local files keep a sidecar; remote tracks go to the lyrics dir. */
+    fun save(track: com.rabbeat.app.domain.model.Track, lrc: String): File? {
+        val target = sidecar(track)?.takeIf { it.parentFile?.isDirectory == true } ?: storedFile(track.id)
+        return runCatching {
+            target.parentFile?.mkdirs()
+            target.writeText(lrc, Charsets.UTF_8)
+            target
+        }.getOrNull()
+    }
+
+    private fun sidecar(track: com.rabbeat.app.domain.model.Track): File? {
+        if (!track.uri.startsWith("file:")) return null
+        val audio = runCatching { File(URI(track.uri)) }.getOrNull() ?: return null
+        val parent = audio.parentFile ?: return null
+        return File(parent, audio.nameWithoutExtension + ".lrc")
+    }
+
+    private fun storedFile(id: String): File {
+        val safe = id.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "track" }
+        return File(DesktopSettings().lyricRoot(), "$safe.lrc")
     }
 
     fun parse(content: String): List<LrcLine> =

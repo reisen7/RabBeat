@@ -12,6 +12,10 @@ import com.rabbeat.app.domain.model.FolderSummary
 import com.rabbeat.app.domain.model.TrackOrigin
 import kotlinx.coroutines.flow.Flow
 
+private const val SCANNED_TRACKS =
+    "(sourceId = 'dsk_local' AND IFNULL(folder, '') != '来自手机') " +
+        "OR sourceId = 'src_device' OR sourceId LIKE 'fld\\_%' ESCAPE '\\'"
+
 @Dao
 interface TrackDao {
     @Query("SELECT * FROM tracks WHERE hidden = 0 ORDER BY title COLLATE NOCASE")
@@ -46,11 +50,26 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE id = :id")
     suspend fun get(id: String): TrackEntity?
 
+    @Query("SELECT * FROM tracks WHERE hidden = 0")
+    suspend fun allVisible(): List<TrackEntity>
+
+    @Query("SELECT * FROM tracks WHERE contentKey = :key LIMIT 1")
+    suspend fun byContentKey(key: String): TrackEntity?
+
+    @Query("SELECT * FROM tracks WHERE syncId = :syncId LIMIT 1")
+    suspend fun bySyncId(syncId: String): TrackEntity?
+
+    @Query("UPDATE tracks SET contentKey = :contentKey, syncId = :syncId WHERE id = :id")
+    suspend fun setIdentity(id: String, contentKey: String, syncId: String)
+
     @Query("SELECT * FROM tracks WHERE id IN (:ids)")
     suspend fun getByIds(ids: List<String>): List<TrackEntity>
 
     @Query("SELECT * FROM tracks WHERE sourceId = :sourceId")
     suspend fun getBySource(sourceId: String): List<TrackEntity>
+
+    @Query("SELECT * FROM tracks WHERE uri LIKE '%/files/sync/%'")
+    suspend fun inSyncFolder(): List<TrackEntity>
 
     @RawQuery(observedEntities = [TrackEntity::class])
     fun pagingSource(query: RoomRawQuery): PagingSource<Int, TrackEntity>
@@ -122,6 +141,9 @@ interface TrackDao {
     @Query("UPDATE tracks SET origin = :origin WHERE id = :id")
     suspend fun updateOrigin(id: String, origin: TrackOrigin)
 
+    @Query("UPDATE tracks SET durationMs = :ms WHERE id = :id")
+    suspend fun setDurationMs(id: String, ms: Long)
+
     @Query("UPDATE tracks SET isFavorite = NOT isFavorite WHERE id = :id")
     suspend fun toggleFavorite(id: String)
 
@@ -145,6 +167,12 @@ interface TrackDao {
     @Query("UPDATE tracks SET durationMs = :durationMs WHERE id = :id")
     suspend fun updateDuration(id: String, durationMs: Long)
 
+    @Query("UPDATE tracks SET uri = :uri WHERE id = :id")
+    suspend fun updateUri(id: String, uri: String)
+
+    @Query("UPDATE tracks SET artworkUri = :uri WHERE id = :id")
+    suspend fun updateArtworkUri(id: String, uri: String?)
+
     @Query("UPDATE tracks SET lyricUri = :lyricUri WHERE id = :id")
     suspend fun updateLyricUri(id: String, lyricUri: String?)
 
@@ -156,6 +184,12 @@ interface TrackDao {
 
     @Query("DELETE FROM tracks WHERE sourceId = :sourceId")
     suspend fun deleteBySource(sourceId: String)
+
+    @Query("SELECT COUNT(*) FROM tracks WHERE $SCANNED_TRACKS")
+    suspend fun countScanned(): Int
+
+    @Query("DELETE FROM tracks WHERE $SCANNED_TRACKS")
+    suspend fun deleteScanned()
 
     @Query("DELETE FROM tracks WHERE sourceId = 'src_local' OR id LIKE 'trk\\_%' ESCAPE '\\' OR uri LIKE 'android.resource://%'")
     suspend fun deleteDemo()

@@ -10,6 +10,7 @@ import com.rabbeat.app.data.local.MIGRATION_4_5
 import com.rabbeat.app.data.local.MIGRATION_5_6
 import com.rabbeat.app.data.local.MIGRATION_6_7
 import com.rabbeat.app.data.local.MIGRATION_7_8
+import com.rabbeat.app.data.local.MIGRATION_8_9
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.dao.LyricLinkDao
 import com.rabbeat.app.data.local.dao.PlayHistoryDao
@@ -34,7 +35,7 @@ object DatabaseModule {
     fun provideDatabase(@ApplicationContext context: Context): RabBeatDatabase =
         Room.databaseBuilder<RabBeatDatabase>(context, "rabbeat.db")
             .setDriver(BundledSQLiteDriver())
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
             .fallbackToDestructiveMigration(true)
             .build()
 

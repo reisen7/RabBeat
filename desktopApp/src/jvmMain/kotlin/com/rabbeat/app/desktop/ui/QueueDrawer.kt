@@ -55,8 +55,6 @@ import com.rabbeat.app.playback.PlaybackUiState
 import com.rabbeat.app.ui.components.Artwork
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.EqualizerBars
-import com.rabbeat.app.ui.components.LocalCardOpacity
-import com.rabbeat.app.ui.components.LocalHasBackgroundImage
 import com.rabbeat.app.ui.theme.LocalAccentPalette
 import com.rabbeat.app.ui.theme.LocalRabBeatPalette
 
@@ -86,9 +84,9 @@ fun BoxScope.QueueDrawer(
         modifier = Modifier.align(Alignment.TopEnd).fillMaxHeight().width(400.dp),
     ) {
         val palette = LocalRabBeatPalette.current
-        val hasBg = LocalHasBackgroundImage.current
-        val bgAlpha = if (hasBg) LocalCardOpacity.current.coerceIn(0.65f, 0.96f) else 1f
-        val drawerBg = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = bgAlpha)
+        // Solid theme surface so the drawer stays legible over lyrics/artwork
+        // regardless of the user's card-opacity slider.
+        val drawerBg = palette.elevated
         val borderColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
         val shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp)
         Row(
@@ -138,7 +136,7 @@ fun BoxScope.QueueDrawer(
                         }
                         VerticalScrollbar(
                             adapter = rememberScrollbarAdapter(listState),
-                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
                         )
                     }
                 }
@@ -174,7 +172,7 @@ private fun QueueRow(i: Int, track: Track, state: PlaybackUiState, player: Playb
             } else {
                 Text(
                     "${i + 1}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -214,7 +212,7 @@ private fun QueueRow(i: Int, track: Track, state: PlaybackUiState, player: Playb
         } else {
             Text(
                 formatMs(track.durationMs),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

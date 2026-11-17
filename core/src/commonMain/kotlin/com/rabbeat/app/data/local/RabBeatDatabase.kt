@@ -36,7 +36,7 @@ import com.rabbeat.app.data.local.entity.TrackEntity
         PlayHistoryEntity::class,
         LyricLinkEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 @TypeConverters(EnumConverters::class)
@@ -50,6 +50,17 @@ abstract class RabBeatDatabase : RoomDatabase() {
     abstract fun playbackStateDao(): PlaybackStateDao
     abstract fun playHistoryDao(): PlayHistoryDao
     abstract fun lyricLinkDao(): LyricLinkDao
+}
+
+suspend fun RabBeatDatabase.clearScannedTracks(): Int {
+    val count = trackDao().countScanned()
+    playlistDao().deleteScannedRefs()
+    lyricLinkDao().deleteScanned()
+    playHistoryDao().deleteScanned()
+    trackDao().deleteScanned()
+    albumDao().deleteOrphans()
+    artistDao().deleteOrphans()
+    return count
 }
 
 // The Room compiler generates the actual implementations per target.
