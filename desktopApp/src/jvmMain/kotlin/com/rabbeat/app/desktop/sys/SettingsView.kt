@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -815,9 +816,12 @@ fun SettingsView(
             onDismissRequest = { updateDialog = null },
             title = { Text("发现新版本 ${rel.tag}", fontWeight = FontWeight.SemiBold) },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text(rel.notes.ifBlank { "查看发布页了解详情" }, style = MaterialTheme.typography.bodySmall)
-                }
+                ReleaseNotes(
+                    rel.notes,
+                    Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
             },
             confirmButton = {
                 Button(

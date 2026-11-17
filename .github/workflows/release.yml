@@ -259,4 +259,5 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease }}
           body_path: changelog.md
           fail_on_unmatched_files: true
+          overwrite_files: true
           files: dist/*

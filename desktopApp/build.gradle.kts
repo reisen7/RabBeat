@@ -77,6 +77,8 @@ compose.desktop {
 
             windows {
                 menuGroup = "RabBeat"
+                // jpackage only adds a desktop icon when this is set.
+                shortcut = true
                 upgradeUuid = "5f7d0c4e-2c8a-4f6e-9b1d-3a8e6c5d2f01"
                 iconFile.set(project.file("packaging/rabbeat.ico"))
             }
