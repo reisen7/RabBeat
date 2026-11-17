@@ -59,6 +59,21 @@ class DesktopSettings(private val file: File = File(LibraryScanner.dataDir(), "s
     var closeToTray: Boolean = load("closeToTray", "true").toBoolean()
         set(value) { field = value; save("closeToTray", value.toString()) }
 
+    var hotkeyPlay: String = load("hotkeyPlay", DefaultChords.getValue(HotkeyAction.Play).encode())
+        set(value) { field = value; save("hotkeyPlay", value) }
+
+    var hotkeyPrev: String = load("hotkeyPrev", DefaultChords.getValue(HotkeyAction.Prev).encode())
+        set(value) { field = value; save("hotkeyPrev", value) }
+
+    var hotkeyNext: String = load("hotkeyNext", DefaultChords.getValue(HotkeyAction.Next).encode())
+        set(value) { field = value; save("hotkeyNext", value) }
+
+    var hotkeySearch: String = load("hotkeySearch", DefaultChords.getValue(HotkeyAction.Search).encode())
+        set(value) { field = value; save("hotkeySearch", value) }
+
+    var hotkeyDismiss: String = load("hotkeyDismiss", "")
+        set(value) { field = value; save("hotkeyDismiss", value) }
+
     var cacheDir: String = load("cacheDir", "")
         set(value) { field = value; save("cacheDir", value) }
 

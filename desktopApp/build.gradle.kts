@@ -69,11 +69,19 @@ compose.desktop {
             packageVersion = numericVersion
             description = "RabBeat - local music player"
             vendor = "RabBeat"
-            // Cap heap: a runaway list would OOM inside the app instead of
-            // pressuring the whole machine.
+            // SerialGC commits heap close to what is actually used. G1 with a
+            // 384 MB cap kept empty regions resident and the working set rose.
             // No -Dfile.encoding=UTF-8: on GBK Windows it desyncs AWT tray
             // menus (PopupMenu labels encode via file.encoding → mojibake).
-            jvmArgs("-Xmx1g", "-Drabbeat.version=$desktopVersion")
+            jvmArgs(
+                "-Xms16m",
+                "-Xmx192m",
+                "-XX:+UseSerialGC",
+                "-XX:TieredStopAtLevel=1",
+                "-XX:ReservedCodeCacheSize=32m",
+                "-XX:SoftRefLRUPolicyMSPerMB=10",
+                "-Drabbeat.version=$desktopVersion",
+            )
 
             windows {
                 menuGroup = "RabBeat"
@@ -93,6 +101,14 @@ compose.desktop {
 // `./gradlew :desktopApp:run` also gets the version (nativeDistributions
 // jvmArgs only reach the packaged launchers).
 tasks.withType<JavaExec>().configureEach {
+    jvmArgs(
+        "-Xms16m",
+        "-Xmx192m",
+        "-XX:+UseSerialGC",
+        "-XX:TieredStopAtLevel=1",
+        "-XX:ReservedCodeCacheSize=32m",
+        "-XX:SoftRefLRUPolicyMSPerMB=10",
+    )
     systemProperty("rabbeat.version", desktopVersion)
     providers.gradleProperty("rabbeat.dataDir").orNull?.let {
         systemProperty("rabbeat.dataDir", it)

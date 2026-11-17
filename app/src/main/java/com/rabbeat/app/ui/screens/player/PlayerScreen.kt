@@ -73,7 +73,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -100,6 +99,7 @@ import com.rabbeat.app.domain.repository.SettingsRepository
 import com.rabbeat.app.domain.usecase.ToggleFavoriteUseCase
 import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.ui.components.Artwork
+import com.rabbeat.app.ui.components.BlurredBackdrop
 import com.rabbeat.app.ui.components.EmptyState
 import com.rabbeat.app.ui.components.LoadingState
 import com.rabbeat.app.util.ArtworkColorCache
@@ -206,9 +206,16 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     }
     LaunchedEffect(track?.artworkUri, nextPeek?.artworkUri, prevPeek?.artworkUri) {
         val loader = coil3.SingletonImageLoader.get(context)
+        val px = context.resources.displayMetrics.widthPixels.coerceAtMost(1080)
         for (uri in listOf(track?.artworkUri, nextPeek?.artworkUri, prevPeek?.artworkUri)) {
             if (!uri.isNullOrBlank() && !uri.startsWith("android.resource://")) {
-                loader.enqueue(coil3.request.ImageRequest.Builder(context).data(uri).build())
+                loader.enqueue(
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(uri)
+                        .size(px, px)
+                        .scale(coil3.size.Scale.FILL)
+                        .build(),
+                )
             }
         }
     }
@@ -251,25 +258,13 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
                     ),
                 ),
         )
+        val backdrop = track?.artworkUri
+        if (!backdrop.isNullOrBlank()) {
+            // A full-screen live blur keeps an extra screen-sized layer. A small
+            // pre-blurred bitmap is enough once the gradient sits on top.
+            BlurredBackdrop(uri = backdrop, blurDp = 90f, maxEdge = 128, onReady = {})
+        }
         if (track != null) {
-            AnimatedContent(
-                targetState = track.artworkUri,
-                transitionSpec = { fadeIn(tween(450)) togetherWith fadeOut(tween(450)) },
-                label = "bg-art",
-            ) { uri ->
-                Artwork(
-                    uri,
-                    track.title,
-                    Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.35f
-                            scaleY = 1.35f
-                        }
-                        .blur(90.dp),
-                    0.dp,
-                )
-            }
             Box(
                 Modifier
                     .fillMaxSize()

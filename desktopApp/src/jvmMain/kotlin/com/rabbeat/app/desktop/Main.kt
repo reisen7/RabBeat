@@ -38,6 +38,7 @@ import androidx.compose.ui.window.rememberWindowState
 import androidx.room.Room
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import coil3.SingletonImageLoader
+import coil3.memory.MemoryCache
 import coil3.map.Mapper
 import coil3.request.Options
 import com.rabbeat.app.data.local.MIGRATION_1_2
@@ -62,6 +63,8 @@ import java.io.File
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private fun openDatabase(): RabBeatDatabase {
     val dir = LibraryScanner.dataDir().apply { mkdirs() }
@@ -89,8 +92,17 @@ private fun debugWindowSize(): Pair<Int, Int>? = System.getProperty("rabbeat.win
 
 fun main() {
     if (!SingleInstance.acquire()) exitProcess(0)
+    val coverCache = MemoryCache.Builder()
+        .maxSizeBytes(24 * 1024 * 1024)
+        .build()
+    DesktopMemory.coverCache = coverCache
     SingletonImageLoader.setSafe { context ->
         coil3.ImageLoader.Builder(context)
+            .memoryCache {
+                // Default is ~20% of -Xmx. A 1 GB heap let decoded covers
+                // pile up well past the ones actually on screen.
+                coverCache
+            }
             .components {
                 add(
                     Mapper<String, File> { data, _ ->
@@ -186,12 +198,44 @@ fun main() {
         )
     }
 
+    var searchTick by remember { mutableStateOf(0) }
+    DisposableEffect(Unit) {
+        GlobalHotkeys.install { action ->
+            appScope.launch {
+                when (action) {
+                    HotkeyAction.Play -> player.toggle()
+                    HotkeyAction.Prev -> player.previous()
+                    HotkeyAction.Next -> player.next()
+                    HotkeyAction.Search -> {
+                        windowVisible = true
+                        activateTick++
+                        searchTick++
+                    }
+                    HotkeyAction.Dismiss -> {
+                        queueOpen.value = false
+                        playerOpen.value = false
+                    }
+                }
+            }
+        }
+        GlobalHotkeys.apply(settings.hotkeyMap())
+        onDispose { }
+    }
+
+    LaunchedEffect(windowVisible) {
+        if (!windowVisible) DesktopMemory.park()
+    }
+
     if (windowVisible) Window(
         onCloseRequest = closeRequest,
         undecorated = true,
         title = "RabBeat",
         state = windowState,
         onPreviewKeyEvent = { e ->
+            if (GlobalHotkeys.isPaused()) {
+                if (e.type == KeyEventType.KeyDown) GlobalHotkeys.onCapture?.invoke(e)
+                return@Window true
+            }
             if (e.type != KeyEventType.KeyUp) return@Window false
             when {
                 e.isCtrlPressed && e.key == Key.DirectionRight -> { player.next(); true }
@@ -205,6 +249,25 @@ fun main() {
         },
     ) {
         window.minimumSize = Dimension(1000, 640)
+        var asleep by remember { mutableStateOf(false) }
+        DisposableEffect(window) {
+            val listener = object : WindowAdapter() {
+                override fun windowIconified(e: WindowEvent) { asleep = true }
+                override fun windowDeiconified(e: WindowEvent) { asleep = false }
+            }
+            window.addWindowListener(listener)
+            onDispose { window.removeWindowListener(listener) }
+        }
+        LaunchedEffect(asleep) {
+            if (asleep) DesktopMemory.park()
+        }
+        LaunchedEffect(searchTick, asleep) {
+            if (searchTick == 0 || asleep) return@LaunchedEffect
+            repeat(5) {
+                delay(60)
+                if (runCatching { keys.searchFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+            }
+        }
         // Windows 11 rounded corners via DWM; older systems fall back to an
         // AWT window shape (re-applied on resize, cleared while maximized).
         var dwmRounded by remember { mutableStateOf<Boolean?>(null) }
@@ -268,7 +331,7 @@ fun main() {
                                 .height(56.dp)
                                 .align(Alignment.TopCenter),
                         )
-                        AppShell(
+                        if (!asleep) AppShell(
                             db = db,
                             player = player,
                             scope = appScope,
@@ -286,6 +349,7 @@ fun main() {
                         WindowControls(
                             placement = windowState.placement,
                             onMinimize = {
+                                asleep = true
                                 if (!WinNative.minimize(window)) windowState.isMinimized = true
                             },
                             onToggleMaximize = ::toggleMaximize,

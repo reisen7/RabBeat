@@ -5,6 +5,7 @@ import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,19 +56,33 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import kotlin.system.exitProcess
 import androidx.room.RoomRawQuery
 import com.rabbeat.app.data.local.RabBeatDatabase
@@ -95,6 +110,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -131,6 +147,9 @@ fun SettingsView(
     var updateHint by remember { mutableStateOf<String?>(null) }
     var canReplaceInstall by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
+    var hotkeys by remember { mutableStateOf(settings.hotkeyMap()) }
+    var capturing by remember { mutableStateOf<HotkeyAction?>(null) }
+    var captureHint by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         canReplaceInstall = withContext(Dispatchers.IO) { DesktopUpdate.installedExe() != null }
     }
@@ -710,29 +729,41 @@ fun SettingsView(
                 }
 
                 Spacer(Modifier.height(20.dp))
-                SectionTitle("快捷键速查")
+                SectionTitle("全局快捷键")
+                Text(
+                    "最小化或收到托盘后仍然有效。点右侧按键可以修改。窗口里的 Space、Ctrl + 方向键、Ctrl + F、Esc 保持不变。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.secondaryLabel,
+                    modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                )
                 SettingsCard {
-                    val shortcuts = listOf(
-                        "Space" to "播放 / 暂停",
-                        "Ctrl + ← / →" to "上一首 / 下一首",
-                        "Ctrl + F" to "聚焦顶部搜索框",
-                        "Esc" to "收起播放详情页或队列抽屉",
+                    val rows = listOf(
+                        HotkeyAction.Play,
+                        HotkeyAction.Prev,
+                        HotkeyAction.Next,
+                        HotkeyAction.Search,
+                        HotkeyAction.Dismiss,
                     )
-                    shortcuts.forEachIndexed { idx, (keyLabel, desc) ->
+                    rows.forEachIndexed { idx, action ->
                         if (idx > 0) CardDivider()
                         Row(
                             Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 18.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(desc, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            Text(hotkeyTitle(action), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                             Box(
                                 Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(palette.fill)
+                                    .hand()
+                                    .clickable {
+                                        captureHint = null
+                                        capturing = action
+                                    }
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                             ) {
                                 Text(
-                                    keyLabel,
+                                    hotkeys[action]?.label() ?: "未设置",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Medium,
                                     fontFamily = FontFamily.Monospace,
@@ -775,6 +806,74 @@ fun SettingsView(
             },
             onDismiss = { cropSource = null },
         )
+    }
+
+    capturing?.let { action ->
+        val onKey = fun(e: KeyEvent): Boolean {
+            if (e.type != KeyEventType.KeyDown) return false
+            val bare = !e.isCtrlPressed && !e.isAltPressed && !e.isShiftPressed && !e.isMetaPressed
+            if (e.key == Key.Escape && bare) {
+                capturing = null
+                return true
+            }
+            if ((e.key == Key.Backspace || e.key == Key.Delete) && bare) {
+                settings.storeChord(action, null)
+                hotkeys = settings.hotkeyMap()
+                GlobalHotkeys.apply(hotkeys)
+                capturing = null
+                return true
+            }
+            val chord = chordOf(e) ?: return true
+            val used = hotkeys.entries.firstOrNull { it.key != action && it.value == chord }
+            if (used != null) {
+                captureHint = "已经用于「${hotkeyTitle(used.key)}」"
+                return true
+            }
+            settings.storeChord(action, chord)
+            hotkeys = settings.hotkeyMap()
+            GlobalHotkeys.apply(hotkeys)
+            capturing = null
+            if (!chord.hasModifier) {
+                status = "这个快捷键没有修饰键，后台时会挡住其他程序里的同一个键"
+            }
+            return true
+        }
+        SideEffect { GlobalHotkeys.onCapture = onKey }
+        DisposableEffect(action) {
+            GlobalHotkeys.pause(true)
+            onDispose {
+                GlobalHotkeys.onCapture = null
+                GlobalHotkeys.pause(false)
+            }
+        }
+        val captureFocus = remember { FocusRequester() }
+        Dialog(onDismissRequest = { capturing = null }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = palette.card,
+            ) {
+                Column(
+                    Modifier
+                        .widthIn(min = 340.dp)
+                        .padding(24.dp)
+                        .focusRequester(captureFocus)
+                        .focusable()
+                        .onPreviewKeyEvent { onKey(it) },
+                ) {
+                    LaunchedEffect(Unit) {
+                        delay(40)
+                        runCatching { captureFocus.requestFocus() }
+                    }
+                    Text("设置快捷键", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        captureHint ?: "按下新的组合键。Backspace 清除，Esc 取消。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (captureHint == null) palette.secondaryLabel else MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
     }
 
     status?.let { message ->
@@ -893,6 +992,14 @@ fun SettingsView(
             },
         )
     }
+}
+
+private fun hotkeyTitle(action: HotkeyAction): String = when (action) {
+    HotkeyAction.Play -> "播放 / 暂停"
+    HotkeyAction.Prev -> "上一首"
+    HotkeyAction.Next -> "下一首"
+    HotkeyAction.Search -> "打开窗口并聚焦搜索"
+    HotkeyAction.Dismiss -> "收起播放详情或队列"
 }
 
 @Composable

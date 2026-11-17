@@ -91,6 +91,33 @@ val LocalBriefNotice = compositionLocalOf<(String) -> Unit> { {} }
  * no halo and no need to scale the image up). For sigma > 12 the bitmap is
  * blurred at half resolution — indistinguishable once upscaled by Crop.
  */
+/** Decode the custom background no larger than a window. A 4K photo kept as-is is tens of MB. */
+private fun loadBackground(path: String, maxEdge: Int = 1600): ImageBitmap? {
+    val file = File(path)
+    if (!file.isFile) return null
+    return runCatching {
+        val encoded = file.readBytes()
+        org.jetbrains.skia.Image.makeFromEncoded(encoded).use { image ->
+            val longest = maxOf(image.width, image.height).coerceAtLeast(1)
+            val scale = minOf(1f, maxEdge.toFloat() / longest)
+            val w = (image.width * scale).toInt().coerceAtLeast(1)
+            val h = (image.height * scale).toInt().coerceAtLeast(1)
+            val bitmap = org.jetbrains.skia.Bitmap().apply {
+                allocPixels(org.jetbrains.skia.ImageInfo.makeN32Premul(w, h))
+            }
+            val paint = org.jetbrains.skia.Paint().apply { isAntiAlias = true }
+            org.jetbrains.skia.Canvas(bitmap).drawImageRect(
+                image,
+                org.jetbrains.skia.Rect.makeWH(image.width.toFloat(), image.height.toFloat()),
+                org.jetbrains.skia.Rect.makeWH(w.toFloat(), h.toFloat()),
+                paint,
+            )
+            paint.close()
+            bitmap.asComposeImageBitmap()
+        }
+    }.getOrNull()
+}
+
 private fun blurBitmap(src: androidx.compose.ui.graphics.ImageBitmap, blurDp: Float): androidx.compose.ui.graphics.ImageBitmap {
     val sigma = blurDp
     if (sigma <= 0.5f) return src
@@ -197,7 +224,7 @@ fun AppShell(
     val bgBlur = remember(appearanceTick) { settings.bgBlur }
     val bgBitmap by produceState<ImageBitmap?>(null, bgPath, bgBlur) {
         value = bgPath.takeIf { it.isNotBlank() }
-            ?.let { runCatching { androidx.compose.ui.res.loadImageBitmap(File(it).inputStream()) }.getOrNull() }
+            ?.let { loadBackground(it) }
             ?.let { blurBitmap(it, bgBlur) }
     }
 

@@ -68,7 +68,13 @@ object WinNative {
     private const val DWMWA_WINDOW_CORNER_PREFERENCE = 33
     private const val DWMWCP_ROUND = 2
 
+    private interface Kernel32 : StdCallLibrary {
+        fun GetCurrentProcess(): Pointer
+        fun SetProcessWorkingSetSize(process: Pointer, min: Long, max: Long): Boolean
+    }
+
     private val user32 by lazy { runCatching { Native.load("user32", User32::class.java) }.getOrNull() }
+    private val kernel32 by lazy { runCatching { Native.load("kernel32", Kernel32::class.java) }.getOrNull() }
     private val dwm by lazy { runCatching { Native.load("dwmapi", DwmApi::class.java) }.getOrNull() }
     /** Kept alive so the native callbacks are not collected. */
     private val borderlessProcs = mutableListOf<WindowProc>()
@@ -138,6 +144,12 @@ object WinNative {
 
     fun minimize(w: Window): Boolean =
         hwnd(w)?.let { user32?.ShowWindow(it, SW_MINIMIZE) } == true
+
+    /** Same trim Microsoft PC Manager uses: drop pages that are not being touched. */
+    fun trimWorkingSet() {
+        val k = kernel32 ?: return
+        runCatching { k.SetProcessWorkingSetSize(k.GetCurrentProcess(), -1L, -1L) }
+    }
 
     /** Bring a hidden or minimized window back without dropping a maximized frame. */
     fun toForeground(w: Window) {

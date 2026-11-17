@@ -87,7 +87,12 @@ fun RabBeatBackground(
  */
 @OptIn(FlowPreview::class)
 @Composable
-private fun BlurredBackdrop(uri: String, blurDp: Float, onReady: () -> Unit) {
+internal fun BlurredBackdrop(
+    uri: String,
+    blurDp: Float,
+    maxEdge: Int = 0,
+    onReady: () -> Unit,
+) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val container = LocalWindowInfo.current.containerSize
@@ -110,7 +115,7 @@ private fun BlurredBackdrop(uri: String, blurDp: Float, onReady: () -> Unit) {
             .collectLatest { dp ->
                 value = withContext(Dispatchers.IO) {
                     val t0 = android.os.SystemClock.elapsedRealtime()
-                    runCatching { loadBackdrop(context, uri, dp * density, container) }
+                    runCatching { loadBackdrop(context, uri, dp * density, container, maxEdge) }
                         .onSuccess {
                             logger.d("Background", "backdrop decoded in ${android.os.SystemClock.elapsedRealtime() - t0}ms")
                         }
@@ -133,16 +138,27 @@ private fun BlurredBackdrop(uri: String, blurDp: Float, onReady: () -> Unit) {
     }
 }
 
-private suspend fun loadBackdrop(context: Context, uri: String, blurPx: Float, container: IntSize): ImageBitmap? {
-    val shrink = if (blurPx > 2f) 4 else 1
-    val w = (container.width / shrink).coerceAtLeast(64)
-    val h = (container.height / shrink).coerceAtLeast(64)
+private suspend fun loadBackdrop(
+    context: Context,
+    uri: String,
+    blurPx: Float,
+    container: IntSize,
+    maxEdge: Int,
+): ImageBitmap? {
+    val longEdge = maxOf(container.width, container.height).coerceAtLeast(1)
+    val shrink = when {
+        maxEdge > 0 -> (longEdge / maxEdge).coerceAtLeast(1)
+        blurPx > 2f -> 4
+        else -> 1
+    }
+    val w = (container.width / shrink).coerceAtLeast(32)
+    val h = (container.height / shrink).coerceAtLeast(32)
     val result = SingletonImageLoader.get(context).execute(
         ImageRequest.Builder(context)
             .data(uri)
             .size(w, h)
             .scale(Scale.FILL)
-            .bitmapConfig(Bitmap.Config.ARGB_8888)
+            .bitmapConfig(if (maxEdge > 0) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888)
             .build(),
     )
     val decoded = (result.image as? coil3.BitmapImage)?.bitmap ?: return null

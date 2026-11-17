@@ -8,6 +8,8 @@ import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.rabbeat.app.data.local.dao.PlaybackStateDao
 import com.rabbeat.app.data.local.entity.PlaybackStateEntity
 import com.rabbeat.app.di.ApplicationScope
@@ -72,6 +74,18 @@ class PlayerController @Inject constructor(
 
     private var initJob: Job? = null
 
+    /**
+     * Audio only needs a few seconds of compressed data. The default control
+     * sizes its pool like a video player and then keeps that memory around.
+     */
+    private fun audioLoadControl() = DefaultLoadControl.Builder()
+        .setAllocator(DefaultAllocator(true, 64 * 1024))
+        .setBufferDurationsMs(8_000, 20_000, 400, 1_000)
+        .setTargetBufferBytes(3 * 1024 * 1024)
+        .setBackBuffer(0, false)
+        .setPrioritizeTimeOverSizeThresholds(false)
+        .build()
+
     override fun warmUp() {
         if (initJob != null) return
         initJob = scope.launch {
@@ -81,6 +95,7 @@ class PlayerController @Inject constructor(
             logger.d("Player", "cache ready ${SystemClock.elapsedRealtime() - start}ms")
             if (player == null) {
                 val exo = androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                    .setLoadControl(audioLoadControl())
                     .setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(C.USAGE_MEDIA)
