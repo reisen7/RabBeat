@@ -7,8 +7,12 @@ import com.rabbeat.app.desktop.sys.*
 import com.rabbeat.app.desktop.tray.*
 import com.rabbeat.app.desktop.ui.*
 
+import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.ScrollbarStyle
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,6 +70,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Room over the bundled SQLite driver, stored at ~/.rabbeat/rabbeat.db. */
 private fun openDatabase(): RabBeatDatabase {
     val dir = LibraryScanner.dataDir().apply { mkdirs() }
     return Room.databaseBuilder<RabBeatDatabase>(File(dir, "rabbeat.db").absolutePath)
@@ -91,6 +96,7 @@ private fun debugWindowSize(): Pair<Int, Int>? = System.getProperty("rabbeat.win
     }
 
 fun main() {
+    // Second launch only activates the running window, then dies here.
     if (!SingleInstance.acquire()) exitProcess(0)
     val coverCache = MemoryCache.Builder()
         .maxSizeBytes(24 * 1024 * 1024)
@@ -137,6 +143,8 @@ fun main() {
         height = (debugWindowSize()?.second ?: settings.windowH).dp,
     )
 
+    // Only the floating size is kept — restoring from maximized would otherwise
+    // reopen the window at the huge maximized bounds.
     val persistWindowSize: () -> Unit = {
         if (windowState.placement == WindowPlacement.Floating) {
             settings.windowW = windowState.size.width.value.toInt()
@@ -222,6 +230,7 @@ fun main() {
         onDispose { }
     }
 
+    // Trayed or minimized: trim the working set so the app idles cheap.
     LaunchedEffect(windowVisible) {
         if (!windowVisible) DesktopMemory.park()
     }
@@ -310,6 +319,8 @@ fun main() {
                 window.requestFocus()
             }
         }
+        // Native ShowWindow path plays the OS max/restore animation; the
+        // WindowPlacement fallback is instant but works when JNA is missing.
         fun toggleMaximize() {
             if (windowState.placement == WindowPlacement.Maximized) {
                 if (!WinNative.restore(window)) windowState.placement = WindowPlacement.Floating
@@ -318,10 +329,32 @@ fun main() {
             }
         }
         RabBeatTheme(themeMode = themeMode, accentTheme = accent, darkPalette = DesktopDarkPalette) {
+            DesktopTypeTheme {
             val palette = LocalRabBeatPalette.current
+            // The desktop default thumb is 12% black, which disappears on a dark background.
+            val scrollbarStyle = if (palette.isDark) {
+                ScrollbarStyle(
+                    minimalHeight = 16.dp,
+                    thickness = 8.dp,
+                    shape = RoundedCornerShape(4.dp),
+                    hoverDurationMillis = 300,
+                    unhoverColor = Color.White.copy(alpha = 0.58f),
+                    hoverColor = Color.White.copy(alpha = 0.86f),
+                )
+            } else {
+                ScrollbarStyle(
+                    minimalHeight = 16.dp,
+                    thickness = 8.dp,
+                    shape = RoundedCornerShape(4.dp),
+                    hoverDurationMillis = 300,
+                    unhoverColor = Color.Black.copy(alpha = 0.12f),
+                    hoverColor = Color.Black.copy(alpha = 0.50f),
+                )
+            }
             CompositionLocalProvider(
                 LocalWindowScope provides this,
                 LocalToggleMaximize provides ::toggleMaximize,
+                LocalScrollbarStyle provides scrollbarStyle,
             ) {
                 Surface(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().border(1.dp, palette.separator)) {
@@ -362,6 +395,7 @@ fun main() {
                         )
                     }
                 }
+            }
             }
         }
     }

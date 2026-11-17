@@ -62,6 +62,7 @@ fun TrackListScreen(
     isCircleCover: Boolean = false,
     fallbackIcon: ImageVector? = null,
     showAlbum: Boolean = true,
+    showPlayCount: Boolean = false,
     onOpenAlbum: ((String) -> Unit)? = null,
     onBack: () -> Unit,
 ) {
@@ -72,6 +73,7 @@ fun TrackListScreen(
         currentTrackId = currentTrackId,
         isPlaying = isPlaying,
         showAlbum = showAlbum,
+        showPlayCount = showPlayCount,
         onOpenAlbum = onOpenAlbum,
         headerContent = {
             DetailHeroHeader(

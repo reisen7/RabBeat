@@ -12,7 +12,15 @@ import java.nio.channels.FileLock
 import java.nio.channels.OverlappingFileLockException
 import kotlin.concurrent.thread
 
+/**
+ * Single-instance guard: an exclusive lock on ~/.rabbeat/instance.lock marks
+ * the running process. A second launch that fails to take the lock connects to
+ * a loopback port the first instance listens on — that poke fires [onActivate]
+ * so the existing window is restored and raised, then the new process exits.
+ * The port is written to instance.port by the lock holder.
+ */
 object SingleInstance {
+    /** Called on the first instance when a second launch pokes the port. */
     @Volatile var onActivate: (() -> Unit)? = null
 
     private var channel: FileChannel? = null
@@ -30,6 +38,7 @@ object SingleInstance {
             null
         }
         if (fl == null) {
+            // Lock already held → another instance is running; wake it and quit.
             runCatching { ch.close() }
             notifyRunning(dir)
             return false

@@ -12,6 +12,7 @@ import com.rabbeat.app.domain.model.Track
 import com.rabbeat.app.playback.PlaybackController
 import com.rabbeat.app.playback.PlaybackUiState
 import com.rabbeat.app.playback.QueueManager
+import com.rabbeat.app.playback.shuffledAroundCurrent
 import com.rabbeat.app.util.NcmDecoderCore
 import com.rabbeat.app.util.QmcDecoderCore
 import java.io.BufferedInputStream
@@ -67,6 +68,8 @@ class DesktopPlayerController(
     val muted = _muted.asStateFlow()
 
     private var queue: List<Track> = emptyList()
+    /** Playlist order captured when shuffle turns on, so turning it off puts songs back. */
+    private var orderedQueue: List<Track>? = null
     private var index: Int = -1
     private var repeatMode: RepeatMode = RepeatMode.OFF
     private var shuffle: Boolean = false
@@ -99,8 +102,6 @@ class DesktopPlayerController(
     @Volatile private var generation = 0
 
     private var consecutiveFailures = 0
-    private val shuffleHistory = ArrayDeque<Int>()
-    private val shufflePlayed = mutableSetOf<Int>()
     private var prefetchFor: String? = null
 
     private var restored = false
@@ -125,10 +126,21 @@ class DesktopPlayerController(
 
     override fun playQueue(tracks: List<Track>, startIndex: Int) {
         if (tracks.isEmpty()) return
-        queue = tracks
-        index = startIndex.coerceIn(tracks.indices)
-        shuffleHistory.clear()
-        shufflePlayed.clear()
+        val same = tracks.size == queue.size && tracks.indices.all { tracks[it].id == queue[it].id }
+        if (!same) {
+            if (shuffle && tracks.size > 1) {
+                orderedQueue = tracks
+                val (next, at) = shuffledAroundCurrent(tracks, startIndex)
+                queue = next
+                index = at
+            } else {
+                orderedQueue = null
+                queue = tracks
+                index = startIndex.coerceIn(tracks.indices)
+            }
+        } else {
+            index = startIndex.coerceIn(tracks.indices)
+        }
         startTrack(seekMs = 0L, play = true)
     }
 
@@ -155,9 +167,6 @@ class DesktopPlayerController(
     override fun previous() {
         if (_state.value.positionMs > 3_000L) {
             seekTo(0L)
-        } else if (shuffle && shuffleHistory.isNotEmpty()) {
-            index = shuffleHistory.removeLast()
-            startTrack(0L, play = true)
         } else {
             advance(-1)
         }
@@ -177,14 +186,30 @@ class DesktopPlayerController(
     }
 
     override fun toggleShuffle() {
-        shuffle = !shuffle
-        if (shuffle) {
-            queue.getOrNull(index)?.let { shufflePlayed += index }
+        val playingId = queue.getOrNull(index)?.id
+        if (!shuffle) {
+            if (queue.size > 1 && index in queue.indices) {
+                orderedQueue = queue.toList()
+                val (next, at) = shuffledAroundCurrent(queue, index)
+                queue = next
+                index = at
+            }
+            shuffle = true
         } else {
-            shuffleHistory.clear()
-            shufflePlayed.clear()
+            val restored = orderedQueue
+            if (!restored.isNullOrEmpty()) {
+                queue = restored
+                index = if (playingId == null) {
+                    0
+                } else {
+                    restored.indexOfFirst { it.id == playingId }.let { if (it < 0) 0 else it }
+                }
+            }
+            orderedQueue = null
+            shuffle = false
         }
         publish(_state.value.isPlaying)
+        scope.launch { persist() }
     }
 
     override fun cycleRepeat() {
@@ -256,7 +281,9 @@ class DesktopPlayerController(
             playQueue(tracks, 0)
             return
         }
+        val currentId = queue[index].id
         queue = queue.toMutableList().also { it.addAll(index + 1, tracks) }
+        insertIntoOrdered(currentId, tracks)
         publish(_state.value.isPlaying)
         scope.launch { persist() }
     }
@@ -264,35 +291,40 @@ class DesktopPlayerController(
     /** Point queued tracks at files that just moved with the convert directory. */
     fun remapUris(rewrite: (String) -> String) {
         var changed = false
-        queue = queue.map { track ->
+        fun rewriteTrack(track: Track): Track {
             val next = rewrite(track.uri)
-            if (next == track.uri) {
+            return if (next == track.uri) {
                 track
             } else {
                 changed = true
                 track.copy(uri = next)
             }
         }
+        queue = queue.map { rewriteTrack(it) }
+        orderedQueue = orderedQueue?.map { rewriteTrack(it) }
         if (changed) publish(_state.value.isPlaying)
     }
 
     /** Point queued tracks at cover files that just moved with the cache directory. */
     fun remapArtwork(rewrite: (String?) -> String?) {
         var changed = false
-        queue = queue.map { track ->
+        fun rewriteTrack(track: Track): Track {
             val next = rewrite(track.artworkUri)
-            if (next == track.artworkUri) {
+            return if (next == track.artworkUri) {
                 track
             } else {
                 changed = true
                 track.copy(artworkUri = next)
             }
         }
+        queue = queue.map { rewriteTrack(it) }
+        orderedQueue = orderedQueue?.map { rewriteTrack(it) }
         if (changed) publish(_state.value.isPlaying)
     }
 
     override fun enqueue(track: Track) {
         queue = queue + track
+        orderedQueue = orderedQueue?.plus(track)
         if (index < 0) {
             index = 0
             publish(false)
@@ -303,8 +335,6 @@ class DesktopPlayerController(
     override fun moveQueueItem(from: Int, to: Int) {
         queue = QueueManager.move(queue, from, to)
         index = QueueManager.shiftedIndex(index, from, to)
-        shuffleHistory.clear()
-        shufflePlayed.clear()
         publish(_state.value.isPlaying)
         scope.launch { persist() }
     }
@@ -312,7 +342,9 @@ class DesktopPlayerController(
     override fun removeFromQueue(itemIndex: Int) {
         if (itemIndex !in queue.indices) return
         val removingCurrent = itemIndex == index
+        val removedId = queue[itemIndex].id
         queue = QueueManager.remove(queue, itemIndex)
+        dropOneFromOrdered(removedId)
         index = when {
             queue.isEmpty() -> -1
             itemIndex < index -> index - 1
@@ -324,8 +356,6 @@ class DesktopPlayerController(
         } else {
             publish(_state.value.isPlaying && queue.isNotEmpty())
         }
-        shuffleHistory.clear()
-        shufflePlayed.clear()
         scope.launch { persist() }
     }
 
@@ -335,8 +365,7 @@ class DesktopPlayerController(
         val removingCurrent = queue.getOrNull(index)?.id in ids
         val wasPlaying = _state.value.isPlaying
         queue = queue.filter { it.id !in ids }
-        shuffleHistory.clear()
-        shufflePlayed.clear()
+        orderedQueue = orderedQueue?.filter { it.id !in ids }
         if (removingCurrent) {
             index = if (queue.isEmpty()) -1 else index.coerceIn(0, queue.lastIndex)
             if (queue.isEmpty()) {
@@ -358,10 +387,25 @@ class DesktopPlayerController(
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)
         index = if (current == null) -1 else 0
-        shuffleHistory.clear()
-        shufflePlayed.clear()
+        orderedQueue = orderedQueue?.let { listOfNotNull(current) }
         publish(_state.value.isPlaying)
         scope.launch { persist() }
+    }
+
+    private fun insertIntoOrdered(afterId: String?, tracks: List<Track>) {
+        val ordered = orderedQueue ?: return
+        if (tracks.isEmpty()) return
+        val at = if (afterId == null) -1 else ordered.indexOfFirst { it.id == afterId }
+        orderedQueue = ordered.toMutableList().also {
+            if (at < 0) it.addAll(tracks) else it.addAll(at + 1, tracks)
+        }
+    }
+
+    private fun dropOneFromOrdered(id: String) {
+        val ordered = orderedQueue ?: return
+        val at = ordered.indexOfFirst { it.id == id }
+        if (at < 0) return
+        orderedQueue = ordered.toMutableList().also { it.removeAt(at) }
     }
 
     // --- engine ---
@@ -369,19 +413,8 @@ class DesktopPlayerController(
     private fun advance(delta: Int, play: Boolean = true) {
         if (queue.isEmpty()) return
         val from = queue.getOrNull(index)
-        val next = if (delta > 0 && shuffle && queue.size > 1) {
-            val unplayed = queue.indices.filter { it != index && it !in shufflePlayed }
-            when {
-                unplayed.isNotEmpty() -> unplayed.random()
-                repeatMode == RepeatMode.ALL -> {
-                    shufflePlayed.clear()
-                    (queue.indices - index).random()
-                }
-                else -> -1
-            }
-        } else {
-            (index + delta).let { if (repeatMode == RepeatMode.ALL) Math.floorMod(it, queue.size) else it.coerceIn(queue.indices) }
-        }
+        val raw = index + delta
+        val next = if (repeatMode == RepeatMode.ALL) Math.floorMod(raw, queue.size) else raw.coerceIn(queue.indices)
         if (next !in queue.indices) {
             DesktopLog.i("Player", "advance stop \"${from?.title}\" pos=${currentPositionMs()}ms delta=$delta")
             publish(_state.value.isPlaying)
@@ -391,7 +424,6 @@ class DesktopPlayerController(
             "Player",
             "advance delta=$delta \"${from?.title}\"@${currentPositionMs()}ms -> \"${queue[next].title}\" dur=${queue[next].durationMs}ms",
         )
-        if (delta > 0 && shuffle) shuffleHistory.addLast(index)
         index = next
         startTrack(0L, play = play)
     }
@@ -434,7 +466,6 @@ class DesktopPlayerController(
             if (play) prepared.line.start() else prepared.line.stop()
             _loading.value = false
             publish(play)
-            if (shuffle) shufflePlayed += index
             persist()
             var ended = pump(prepared.line, prepared.stream, gen, track)
             DesktopLog.i(
@@ -500,7 +531,6 @@ class DesktopPlayerController(
             "Player",
             "failed \"${queue.getOrNull(index)?.title}\" pos=${currentPositionMs()}ms failures=$consecutiveFailures err=$error",
         )
-        if (shuffle) shufflePlayed += index
         error = error ?: "无法解码 ${queue.getOrNull(index)?.title ?: ""}"
         _loading.value = false
         publish(false)
@@ -535,6 +565,7 @@ class DesktopPlayerController(
                         ?.toLong()?.div(1000L)?.takeIf { it > 0 }
                 }.getOrNull()?.let { ms ->
                     queue = queue.map { if (it.id == track.id) it.copy(durationMs = ms) else it }
+                    orderedQueue = orderedQueue?.map { if (it.id == track.id) it.copy(durationMs = ms) else it }
                     db.trackDao().setDurationMs(track.id, ms)
                 }
             }
@@ -549,6 +580,7 @@ class DesktopPlayerController(
                         "short file \"${track.title}\" tag=${track.durationMs}ms audio=${end.endMs}ms bytes=${source.length()}",
                     )
                     queue = queue.map { if (it.id == track.id) it.copy(durationMs = end.endMs) else it }
+                    orderedQueue = orderedQueue?.map { if (it.id == track.id) it.copy(durationMs = end.endMs) else it }
                     db.trackDao().setDurationMs(track.id, end.endMs)
                     if (positionMs > end.endMs) positionMs = 0L
                 }
@@ -723,11 +755,7 @@ class DesktopPlayerController(
         when (repeatMode) {
             RepeatMode.ONE -> startTrack(0L, play = true)
             else -> {
-                val hasNext = if (shuffle && queue.size > 1) {
-                    queue.indices.any { it != index && it !in shufflePlayed } || repeatMode == RepeatMode.ALL
-                } else {
-                    index < queue.lastIndex || repeatMode == RepeatMode.ALL
-                }
+                val hasNext = index < queue.lastIndex || repeatMode == RepeatMode.ALL
                 if (hasNext) {
                     advance(1)
                 } else {
@@ -821,11 +849,6 @@ class DesktopPlayerController(
     private fun peekNextIndex(): Int? {
         if (queue.isEmpty() || index !in queue.indices) return null
         if (repeatMode == RepeatMode.ONE) return index
-        if (shuffle && queue.size > 1) {
-            val unplayed = queue.indices.filter { it != index && it !in shufflePlayed }
-            if (unplayed.isNotEmpty()) return unplayed.random()
-            return if (repeatMode == RepeatMode.ALL) (queue.indices - index).random() else null
-        }
         return if (index < queue.lastIndex) index + 1 else if (repeatMode == RepeatMode.ALL) 0 else null
     }
 
@@ -835,7 +858,13 @@ class DesktopPlayerController(
             PlaybackStateEntity(
                 trackId = queue.getOrNull(index)?.id,
                 positionMs = currentPositionMs(),
-                queueJson = json.encodeToString(StoredQueue(queue.map { it.id })),
+                queueJson = json.encodeToString(
+                    StoredQueue(
+                        ids = queue.map { it.id },
+                        orderedIds = orderedQueue?.map { it.id }.orEmpty(),
+                        shuffle = shuffle,
+                    ),
+                ),
                 updatedAt = System.currentTimeMillis(),
             ),
         )
@@ -846,11 +875,20 @@ class DesktopPlayerController(
         restored = true
         val saved = db.playbackStateDao().get() ?: return
         val raw = saved.queueJson ?: return
-        val ids = runCatching { json.decodeFromString(StoredQueue.serializer(), raw).ids }.getOrDefault(emptyList())
+        val stored = runCatching { json.decodeFromString(StoredQueue.serializer(), raw) }.getOrNull() ?: return
+        val ids = stored.ids
         if (ids.isEmpty()) return
         val entities = db.trackDao().getByIds(ids)
         val byId = entities.associateBy { it.id }
         queue = ids.mapNotNull { byId[it]?.toDomain(null) }
+        if (stored.shuffle && stored.orderedIds.isNotEmpty()) {
+            val orderedEntities = db.trackDao().getByIds(stored.orderedIds).associateBy { it.id }
+            val ordered = stored.orderedIds.mapNotNull { orderedEntities[it]?.toDomain(null) }
+            if (ordered.isNotEmpty()) {
+                shuffle = true
+                orderedQueue = ordered
+            }
+        }
         index = queue.indexOfFirst { it.id == saved.trackId }.let { if (it < 0) 0 else it }
         basePositionMs = saved.positionMs
         _state.value = _state.value.copy(positionMs = saved.positionMs)
@@ -885,5 +923,9 @@ class DesktopPlayerController(
     }
 
     @Serializable
-    private data class StoredQueue(val ids: List<String>)
+    private data class StoredQueue(
+        val ids: List<String>,
+        val orderedIds: List<String> = emptyList(),
+        val shuffle: Boolean = false,
+    )
 }

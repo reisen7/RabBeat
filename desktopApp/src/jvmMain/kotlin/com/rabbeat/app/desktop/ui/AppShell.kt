@@ -342,6 +342,7 @@ fun AppShell(
                                         badge = "排行",
                                         subtitle = "按累计播放次数排序",
                                         fallbackIcon = Icons.Default.Equalizer,
+                                        showPlayCount = true,
                                         tracks = top,
                                         currentTrackId = state.currentTrack?.id,
                                         isPlaying = state.isPlaying,

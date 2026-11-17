@@ -162,8 +162,18 @@ fun PlayerScreen(onBack: () -> Unit, onQueue: () -> Unit, vm: PlayerViewModel = 
     var switchDir by remember { mutableIntStateOf(1) }
     val scope = rememberCoroutineScope()
     val qSize = state.queue.size
-    val nextPeek = if (!state.shuffle && qSize > 1) state.queue.getOrNull((state.currentIndex + 1) % qSize) else null
-    val prevPeek = if (!state.shuffle && qSize > 1) state.queue.getOrNull((state.currentIndex - 1 + qSize) % qSize) else null
+    val nextPeek = when {
+        qSize <= 1 -> null
+        state.currentIndex + 1 < qSize -> state.queue[state.currentIndex + 1]
+        state.repeatMode == RepeatMode.ALL -> state.queue.firstOrNull()
+        else -> null
+    }
+    val prevPeek = when {
+        qSize <= 1 -> null
+        state.currentIndex - 1 >= 0 -> state.queue[state.currentIndex - 1]
+        state.repeatMode == RepeatMode.ALL -> state.queue.lastOrNull()
+        else -> null
+    }
     var shownTrack by remember(track?.id) { mutableStateOf(track) }
     var artX by remember { mutableFloatStateOf(0f) }
     var artW by remember { mutableFloatStateOf(1f) }

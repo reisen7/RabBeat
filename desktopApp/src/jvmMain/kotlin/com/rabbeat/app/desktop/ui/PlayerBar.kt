@@ -71,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.domain.model.RepeatMode
@@ -170,7 +171,7 @@ fun PlayerBar(
                     )
                     Text(
                         state.error ?: (track?.artist ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 19.sp),
                         color = if (state.error != null) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

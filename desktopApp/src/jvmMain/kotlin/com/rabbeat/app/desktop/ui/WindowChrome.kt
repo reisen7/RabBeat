@@ -62,6 +62,9 @@ fun DragRegion(modifier: Modifier = Modifier) {
     val window = scope.window
     Box(
         modifier.pointerInput(window, toggle) {
+            // Compose pointer positions are window-relative, so the drag delta
+            // is computed from MouseInfo screen coordinates instead — otherwise
+            // the window chases its own movement and jitters.
             var lastTapAt = 0L
             var lastTapPos = Offset.Zero
             awaitEachGesture {
@@ -90,6 +93,7 @@ fun DragRegion(modifier: Modifier = Modifier) {
                         window.setLocation(originW.x + now.x - originP.x, originW.y + now.y - originP.y)
                     }
                 }
+                // Manual double-click: ~480ms and ~48px apart, close to the OS metric.
                 if (!dragged && toggle != null) {
                     val at = down.uptimeMillis
                     if (at - lastTapAt < 480L && (down.position - lastTapPos).getDistance() < 48f) {
@@ -176,7 +180,11 @@ private enum class ResizeEdge(val dx: Int, val dy: Int, val cursor: Int) {
     SE(1, 1, Cursor.SE_RESIZE_CURSOR),
 }
 
-/** Invisible resize handles on the window edges/corners for the undecorated frame. */
+/**
+ * Invisible resize handles on the window edges/corners for the undecorated frame.
+ * The 6dp side strips sit over content — right-edge scrollbars are inset 8dp
+ * so their thumbs stay grabbable outside this hot zone.
+ */
 @Composable
 fun BoxScope.WindowResizeHandles(window: Window, enabled: Boolean) {
     if (!enabled) return
@@ -213,6 +221,8 @@ private fun ResizeHandle(edge: ResizeEdge, window: Window, modifier: Modifier) {
                             var h = startBounds.height
                             var x = startBounds.x
                             var y = startBounds.y
+                            // West/north edges resize by moving the origin too,
+                            // keeping the opposite edge anchored in place.
                             if (edge.dx > 0) {
                                 w = (startBounds.width + pt.x - startPoint.x).coerceAtLeast(minW)
                             } else if (edge.dx < 0) {

@@ -154,7 +154,7 @@ private fun QueueRow(i: Int, track: Track, state: PlaybackUiState, player: Playb
     Row(
         Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(68.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (hovered) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
@@ -178,20 +178,21 @@ private fun QueueRow(i: Int, track: Track, state: PlaybackUiState, player: Playb
             }
         }
         Spacer(Modifier.width(10.dp))
-        Artwork(track.artworkUri, track.title, Modifier.size(40.dp), 8.dp)
+        Artwork(track.artworkUri, track.title, Modifier.size(48.dp), 8.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 track.title,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.titleMedium,
                 color = if (current) accent.color else MaterialTheme.colorScheme.onSurface,
-                fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (current) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 track.artist,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

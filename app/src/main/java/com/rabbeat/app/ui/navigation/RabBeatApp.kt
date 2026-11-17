@@ -1,5 +1,17 @@
 package com.rabbeat.app.ui.navigation
 
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -28,10 +40,12 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -97,6 +111,99 @@ sealed interface Route {
     @Serializable data object Playlists : Route
     @Serializable data class PlaylistDetail(val playlistId: String) : Route
 }
+
+// --- Navigation transitions -------------------------------------------------
+// Tabs cross-fade with a tiny settle scale; pushed pages slide horizontally;
+// immersive sheets (Player/Queue) slide vertically from the bottom.
+
+private typealias Transition = AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition
+private typealias ExitTransition_ = AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition
+
+// Direction-aware tab swipe: moving to a higher-index tab slides left, going
+// back slides right. A quarter-width offset keeps it snappy without a full
+// page-width travel. The slide only applies between real tabs — pushing a
+// detail page fades the tab out (the pushed page owns its own slide-in),
+// and popping back to a tab always enters from the left.
+private fun NavDestination?.isTab(): Boolean =
+    this?.let {
+        it.hasRoute<Route.Home>() || it.hasRoute<Route.Library>() ||
+            it.hasRoute<Route.Search>() || it.hasRoute<Route.Profile>()
+    } == true
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.tabForward(): Boolean =
+    initialState.destination.isTab() && targetState.destination.isTab() &&
+        targetState.destination.tabIndex() >= initialState.destination.tabIndex()
+
+private val tabEnter: Transition = {
+    slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) {
+        if (initialState.destination.isTab()) {
+            if (tabForward()) it / 4 else -it / 4
+        } else {
+            -it / 4
+        }
+    } + fadeIn(tween(200))
+}
+private val tabExit: ExitTransition_ = {
+    if (targetState.destination.isTab()) {
+        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) {
+            if (tabForward()) -it / 4 else it / 4
+        } + fadeOut(tween(180))
+    } else {
+        fadeOut(tween(160))
+    }
+}
+
+private val pushEnter: Transition = {
+    slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } + fadeIn(tween(220))
+}
+private val pushExit: ExitTransition_ = {
+    slideOutHorizontally(tween(220)) { -it / 5 } + fadeOut(tween(160))
+}
+private val popEnter: Transition = {
+    slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 5 } + fadeIn(tween(220))
+}
+private val popExit: ExitTransition_ = {
+    slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } + fadeOut(tween(200))
+}
+
+private val sheetEnter: Transition = {
+    slideInVertically(tween(320, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180))
+}
+private val sheetExit: ExitTransition_ = { fadeOut(tween(140)) }
+private val sheetPopEnter: Transition = { fadeIn(tween(140)) }
+private val sheetPopExit: ExitTransition_ = {
+    slideOutVertically(tween(280, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(180))
+}
+
+private inline fun <reified T : Route> NavGraphBuilder.tabPage(
+    noinline content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit,
+) = composable<T>(
+    enterTransition = tabEnter,
+    exitTransition = tabExit,
+    popEnterTransition = tabEnter,
+    popExitTransition = tabExit,
+    content = content,
+)
+
+private inline fun <reified T : Route> NavGraphBuilder.pushPage(
+    noinline content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit,
+) = composable<T>(
+    enterTransition = pushEnter,
+    exitTransition = pushExit,
+    popEnterTransition = popEnter,
+    popExitTransition = popExit,
+    content = content,
+)
+
+private inline fun <reified T : Route> NavGraphBuilder.sheetPage(
+    noinline content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit,
+) = composable<T>(
+    enterTransition = sheetEnter,
+    exitTransition = sheetExit,
+    popEnterTransition = sheetPopEnter,
+    popExitTransition = sheetPopExit,
+    content = content,
+)
 
 @HiltViewModel
 class AppShellViewModel @Inject constructor(
@@ -239,7 +346,7 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                 startDestination = startDestination,
                 modifier = if (immersive) Modifier else Modifier.padding(padding),
             ) {
-                composable<Route.Home> {
+                tabPage<Route.Home> {
                     HomeScreen(
                         onMenu = { scope.launch { drawerState.open() } },
                         onOpenPlayer = { navController.navigate(Route.Player) },
@@ -248,21 +355,21 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onRecent = { navController.navigate(Route.RecentlyAdded) },
                     )
                 }
-                composable<Route.Library> {
+                tabPage<Route.Library> {
                     LibraryScreen(
                         onMenu = { scope.launch { drawerState.open() } },
                         onAlbum = { navController.navigate(Route.AlbumDetail(it)) },
                         onArtist = { navController.navigate(Route.ArtistDetail(it)) },
                     )
                 }
-                composable<Route.Search> {
+                tabPage<Route.Search> {
                     SearchScreen(
                         onMenu = { scope.launch { drawerState.open() } },
                         onAlbum = { navController.navigate(Route.AlbumDetail(it)) },
                         onArtist = { navController.navigate(Route.ArtistDetail(it)) },
                     )
                 }
-                composable<Route.Profile> {
+                tabPage<Route.Profile> {
                     ProfileScreen(
                         onMenu = { scope.launch { drawerState.open() } },
                         onPlaylist = { navController.navigate(Route.PlaylistDetail(it)) },
@@ -271,13 +378,13 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onSettings = { navController.navigate(Route.Settings) },
                     )
                 }
-                composable<Route.Playlists> {
+                pushPage<Route.Playlists> {
                     PlaylistsScreen(
                         onBack = { navController.popBackStack() },
                         onPlaylist = { navController.navigate(Route.PlaylistDetail(it)) },
                     )
                 }
-                composable<Route.Settings> {
+                pushPage<Route.Settings> {
                     SettingsScreen(
                         onBack = { navController.popBackStack() },
                         onDownloads = { navController.navigate(Route.Downloads) },
@@ -286,27 +393,27 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onHidden = { navController.navigate(Route.HiddenTracks) },
                     )
                 }
-                composable<Route.HiddenTracks> { HiddenTracksScreen(onBack = { navController.popBackStack() }) }
-                composable<Route.RecentlyAdded> { RecentlyAddedScreen(onBack = { navController.popBackStack() }) }
-                composable<Route.Appearance> {
+                pushPage<Route.HiddenTracks> { HiddenTracksScreen(onBack = { navController.popBackStack() }) }
+                pushPage<Route.RecentlyAdded> { RecentlyAddedScreen(onBack = { navController.popBackStack() }) }
+                pushPage<Route.Appearance> {
                     AppearanceScreen(onBack = { navController.popBackStack() })
                 }
-                composable<Route.Player> {
+                sheetPage<Route.Player> {
                     PlayerScreen(
                         onBack = { navController.popBackStack() },
                         onQueue = { navController.navigate(Route.Queue) },
                     )
                 }
-                composable<Route.Queue> { QueueScreen(onBack = { navController.popBackStack() }) }
-                composable<Route.Downloads> { DownloadsScreen(onBack = { navController.popBackStack() }) }
-                composable<Route.History> { HistoryScreen(onBack = { navController.popBackStack() }) }
-                composable<Route.AlbumDetail> { backStack ->
+                sheetPage<Route.Queue> { QueueScreen(onBack = { navController.popBackStack() }) }
+                pushPage<Route.Downloads> { DownloadsScreen(onBack = { navController.popBackStack() }) }
+                pushPage<Route.History> { HistoryScreen(onBack = { navController.popBackStack() }) }
+                pushPage<Route.AlbumDetail> { backStack ->
                     AlbumDetailScreen(
                         albumId = backStack.toRoute<Route.AlbumDetail>().albumId,
                         onBack = { navController.popBackStack() },
                     )
                 }
-                composable<Route.ArtistDetail> { backStack ->
+                pushPage<Route.ArtistDetail> { backStack ->
                     val route = backStack.toRoute<Route.ArtistDetail>()
                     ArtistDetailScreen(
                         artistId = route.artistId,
@@ -314,13 +421,13 @@ private fun RabBeatScaffold(shell: AppShellViewModel, startDestination: Route) {
                         onAlbum = { navController.navigate(Route.AlbumDetail(it)) },
                     )
                 }
-                composable<Route.SourceDetail> { backStack ->
+                pushPage<Route.SourceDetail> { backStack ->
                     SourceDetailScreen(
                         sourceId = backStack.toRoute<Route.SourceDetail>().sourceId,
                         onBack = { navController.popBackStack() },
                     )
                 }
-                composable<Route.PlaylistDetail> { backStack ->
+                pushPage<Route.PlaylistDetail> { backStack ->
                     PlaylistDetailScreen(
                         playlistId = backStack.toRoute<Route.PlaylistDetail>().playlistId,
                         onBack = { navController.popBackStack() },

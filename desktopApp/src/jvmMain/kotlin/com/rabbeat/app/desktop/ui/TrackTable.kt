@@ -77,6 +77,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.rabbeat.app.data.local.LikedPlaylist
 import com.rabbeat.app.data.local.RabBeatDatabase
@@ -107,6 +108,7 @@ fun TrackTable(
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     showAlbum: Boolean = true,
+    showPlayCount: Boolean = false,
     inPlaylistId: String? = null,
     sort: TrackSort? = null,
     ascending: Boolean = true,
@@ -175,6 +177,7 @@ fun TrackTable(
                 item(key = "__table_columns__") {
                     TrackTableHeader(
                         showAlbum = showAlbum,
+                        showPlayCount = showPlayCount,
                         sort = sort,
                         ascending = ascending,
                         onSortChange = onSortChange,
@@ -252,6 +255,7 @@ fun TrackTable(
                                 isPlaying = isPlaying,
                                 isLiked = isLiked,
                                 showAlbum = showAlbum,
+                                showPlayCount = showPlayCount,
                                 reorderable = canReorder,
                                 dragging = dragging,
                                 selected = picked,
@@ -290,6 +294,9 @@ fun TrackTable(
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 8.dp),
         )
 
+        // "Locate playing track" pill: only while scrolling (+2.5s linger) and
+        // only when the current row is off-screen. itemOffset accounts for the
+        // hero header + column header rows above the track items.
         val currentIndex = tracks.indexOfFirst { it.id == currentTrackId }
         val itemOffset = (if (headerContent != null) 1 else 0) + 1
         val currentVisible by remember(currentTrackId) {
@@ -333,6 +340,7 @@ fun TrackTable(
 @Composable
 private fun TrackTableHeader(
     showAlbum: Boolean,
+    showPlayCount: Boolean,
     sort: TrackSort?,
     ascending: Boolean,
     onSortChange: ((TrackSort) -> Unit)?,
@@ -362,6 +370,11 @@ private fun TrackTableHeader(
                 }
             }
             Spacer(Modifier.width(44.dp))
+            if (showPlayCount) {
+                Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) {
+                    Text("次数", style = MaterialTheme.typography.labelSmall, color = muted)
+                }
+            }
             Box(Modifier.width(76.dp), contentAlignment = Alignment.CenterEnd) {
                 SortableColumnHeader(
                     label = "时长",
@@ -427,6 +440,7 @@ private fun TrackTableRow(
     isPlaying: Boolean,
     isLiked: Boolean,
     showAlbum: Boolean,
+    showPlayCount: Boolean,
     reorderable: Boolean,
     dragging: Boolean,
     selected: Boolean = false,
@@ -524,7 +538,7 @@ private fun TrackTableRow(
                 )
                 Text(
                     track.artist,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 19.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -567,6 +581,15 @@ private fun TrackTableRow(
                         modifier = Modifier.size(16.dp),
                     )
                 }
+            }
+        }
+        if (showPlayCount) {
+            Box(Modifier.width(64.dp), contentAlignment = Alignment.CenterEnd) {
+                Text(
+                    track.playCount.toString(),
+                    style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                    color = if (current) accent.color else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         Box(Modifier.width(76.dp), contentAlignment = Alignment.CenterEnd) {

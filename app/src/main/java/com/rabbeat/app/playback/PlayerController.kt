@@ -57,6 +57,8 @@ class PlayerController @Inject constructor(
     override val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
     private var queue: List<Track> = emptyList()
+    /** Playlist order captured when shuffle turns on, so turning it off puts songs back. */
+    private var orderedQueue: List<Track>? = null
     private var index: Int = -1
     private var pendingSeek: Long = 0L
     private var repeatMode: RepeatMode = RepeatMode.OFF
@@ -139,8 +141,21 @@ class PlayerController @Inject constructor(
     override fun playQueue(tracks: List<Track>, startIndex: Int) {
         if (tracks.isEmpty()) return
         warmUp()
-        queue = tracks
-        index = startIndex.coerceIn(tracks.indices)
+        val same = tracks.size == queue.size && tracks.indices.all { tracks[it].id == queue[it].id }
+        if (!same) {
+            if (shuffle && tracks.size > 1) {
+                orderedQueue = tracks
+                val (next, at) = shuffledAroundCurrent(tracks, startIndex)
+                queue = next
+                index = at
+            } else {
+                orderedQueue = null
+                queue = tracks
+                index = startIndex.coerceIn(tracks.indices)
+            }
+        } else {
+            index = startIndex.coerceIn(tracks.indices)
+        }
         pendingSeek = 0L
         error = null
         lastCountedTrackId = null
@@ -184,9 +199,44 @@ class PlayerController @Inject constructor(
     }
 
     override fun toggleShuffle() {
-        shuffle = !shuffle
-        player?.shuffleModeEnabled = shuffle
-        publish(player?.isPlaying == true, player?.currentPosition ?: pendingSeek)
+        val exo = player
+        val playing = exo?.isPlaying == true
+        val pos = exo?.currentPosition ?: pendingSeek
+        val playingId = queue.getOrNull(index)?.id
+        if (!shuffle) {
+            if (queue.size > 1 && index in queue.indices) {
+                orderedQueue = queue.toList()
+                val (next, at) = shuffledAroundCurrent(queue, index)
+                queue = next
+                index = at
+            }
+            shuffle = true
+        } else {
+            val restored = orderedQueue
+            if (!restored.isNullOrEmpty()) {
+                queue = restored
+                index = if (playingId == null) {
+                    0
+                } else {
+                    restored.indexOfFirst { it.id == playingId }.let { if (it < 0) 0 else it }
+                }
+            }
+            orderedQueue = null
+            shuffle = false
+        }
+        pendingSeek = pos
+        if (exo != null && exo.mediaItemCount > 0 && queue.isNotEmpty()) {
+            exo.shuffleModeEnabled = false
+            exo.setMediaItems(
+                queue.map { mediaItemFactory.create(it) },
+                index.coerceAtLeast(0),
+                pos.coerceAtLeast(0L),
+            )
+            exo.prepare()
+            if (playing) exo.play() else exo.pause()
+        }
+        publish(playing, pos)
+        scope.launch { persist() }
     }
 
     override fun cycleRepeat() {
@@ -255,13 +305,17 @@ class PlayerController @Inject constructor(
                 return
             }
             // Restored queue not applied yet — insert into the pending queue.
+            val currentId = queue.getOrNull(index)?.id
             queue = queue.toMutableList().also { it.addAll((index + 1).coerceAtMost(it.size), tracks) }
+            insertIntoOrdered(currentId, tracks)
             publish(false, pendingSeek)
             return
         }
         val at = (exo.currentMediaItemIndex + 1).coerceAtMost(exo.mediaItemCount)
         exo.addMediaItems(at, tracks.map { mediaItemFactory.create(it) })
+        val currentId = queue.getOrNull(index)?.id ?: exo.currentMediaItem?.mediaId
         queue = queue.toMutableList().also { it.addAll(at.coerceAtMost(it.size), tracks) }
+        insertIntoOrdered(currentId, tracks)
         publish(exo.isPlaying, exo.currentPosition)
     }
 
@@ -274,12 +328,14 @@ class PlayerController @Inject constructor(
         }
         if (exo.mediaItemCount == 0) {
             queue = queue + track
+            orderedQueue = orderedQueue?.plus(track)
             if (index < 0) index = 0
             publish(false, pendingSeek)
             return
         }
         exo.addMediaItem(mediaItemFactory.create(track))
         queue = queue + track
+        orderedQueue = orderedQueue?.plus(track)
         publish(exo.isPlaying, exo.currentPosition)
     }
 
@@ -294,7 +350,9 @@ class PlayerController @Inject constructor(
     override fun removeFromQueue(itemIndex: Int) {
         if (itemIndex !in queue.indices) return
         val removingCurrent = itemIndex == index
+        val removedId = queue[itemIndex].id
         queue = QueueManager.remove(queue, itemIndex)
+        dropOneFromOrdered(removedId)
         player?.removeMediaItem(itemIndex)
         index = when {
             queue.isEmpty() -> -1
@@ -312,6 +370,7 @@ class PlayerController @Inject constructor(
         val removingCurrent = queue.getOrNull(index)?.id in ids
         val removedBefore = if (index > 0) queue.take(index).count { it.id in ids } else 0
         queue = queue.filter { it.id !in ids }
+        orderedQueue = orderedQueue?.filter { it.id !in ids }
         if (queue.isEmpty()) {
             index = -1
             pendingSeek = 0L
@@ -335,6 +394,7 @@ class PlayerController @Inject constructor(
         val current = queue.getOrNull(index)
         queue = listOfNotNull(current)
         index = if (current == null) -1 else 0
+        orderedQueue = orderedQueue?.let { listOfNotNull(current) }
         player?.let { exo ->
             val currentIndex = exo.currentMediaItemIndex
             if (currentIndex < exo.mediaItemCount - 1) {
@@ -344,6 +404,22 @@ class PlayerController @Inject constructor(
         }
         publish(player?.isPlaying == true, player?.currentPosition ?: 0L)
         scope.launch { persist() }
+    }
+
+    private fun insertIntoOrdered(afterId: String?, tracks: List<Track>) {
+        val ordered = orderedQueue ?: return
+        if (tracks.isEmpty()) return
+        val at = if (afterId == null) -1 else ordered.indexOfFirst { it.id == afterId }
+        orderedQueue = ordered.toMutableList().also {
+            if (at < 0) it.addAll(tracks) else it.addAll(at + 1, tracks)
+        }
+    }
+
+    private fun dropOneFromOrdered(id: String) {
+        val ordered = orderedQueue ?: return
+        val at = ordered.indexOfFirst { it.id == id }
+        if (at < 0) return
+        orderedQueue = ordered.toMutableList().also { it.removeAt(at) }
     }
 
     private fun applyToPlayer(play: Boolean) {
@@ -365,6 +441,7 @@ class PlayerController @Inject constructor(
             ) {
                 musicRepository.updateDuration(current.id, currentOverride)
                 queue = queue.map { if (it.id == current.id) it.copy(durationMs = currentOverride) else it }
+                orderedQueue = orderedQueue?.map { if (it.id == current.id) it.copy(durationMs = currentOverride) else it }
             }
             exo.setMediaItems(
                 snapshot.mapIndexed { i, track ->
@@ -373,7 +450,7 @@ class PlayerController @Inject constructor(
                 startIndex.coerceAtLeast(0),
                 seek,
             )
-            exo.shuffleModeEnabled = shuffle
+            exo.shuffleModeEnabled = false
             exo.repeatMode = when (repeatMode) {
                 RepeatMode.OFF -> Player.REPEAT_MODE_OFF
                 RepeatMode.ONE -> Player.REPEAT_MODE_ONE
@@ -414,6 +491,7 @@ class PlayerController @Inject constructor(
         logger.d("Player", "duration corrections: ${corrections.size}")
         musicRepository.updateDurations(corrections)
         queue = queue.map { t -> corrections[t.id]?.let { t.copy(durationMs = it) } ?: t }
+        orderedQueue = orderedQueue?.map { t -> corrections[t.id]?.let { t.copy(durationMs = it) } ?: t }
         val exo = player ?: return
         val exoIndexById = (0 until exo.mediaItemCount)
             .associate { exo.getMediaItemAt(it).mediaId to it }
@@ -453,13 +531,21 @@ class PlayerController @Inject constructor(
             _state.update { it.copy(restoring = false) }
             return
         }
-        val ids = runCatching { json.decodeFromString<StoredQueue>(raw).ids }.getOrDefault(emptyList())
+        val stored = runCatching { json.decodeFromString<StoredQueue>(raw) }.getOrNull()
+        val ids = stored?.ids.orEmpty()
         val restored = musicRepository.getTracks(ids)
         if (restored.isEmpty()) {
             _state.update { it.copy(restoring = false) }
             return
         }
         queue = restored
+        if (stored?.shuffle == true && stored.orderedIds.isNotEmpty()) {
+            val ordered = musicRepository.getTracks(stored.orderedIds)
+            if (ordered.isNotEmpty()) {
+                shuffle = true
+                orderedQueue = ordered
+            }
+        }
         index = restored.indexOfFirst { it.id == saved.trackId }.let { if (it < 0) 0 else it }
         pendingSeek = saved.positionMs
         logger.d("Player", "restored ${restored.size} tracks index=$index seek=${pendingSeek}ms")
@@ -490,12 +576,17 @@ class PlayerController @Inject constructor(
             if (queue.isEmpty()) return@collect
             val byId = latest.associateBy { it.id }
             queue = queue.map { byId[it.id] ?: it }
+            orderedQueue = orderedQueue?.map { byId[it.id] ?: it }
             publish(player?.isPlaying == true, player?.currentPosition ?: pendingSeek)
         }
     }
 
     private suspend fun persist() {
-        val snapshot = StoredQueue(queue.map { it.id })
+        val snapshot = StoredQueue(
+            ids = queue.map { it.id },
+            orderedIds = orderedQueue?.map { it.id }.orEmpty(),
+            shuffle = shuffle,
+        )
         playbackStateDao.upsert(
             PlaybackStateEntity(
                 trackId = queue.getOrNull(index)?.id,
@@ -565,5 +656,9 @@ class PlayerController @Inject constructor(
     }
 
     @Serializable
-    private data class StoredQueue(val ids: List<String>)
+    private data class StoredQueue(
+        val ids: List<String>,
+        val orderedIds: List<String> = emptyList(),
+        val shuffle: Boolean = false,
+    )
 }
