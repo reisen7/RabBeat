@@ -84,7 +84,7 @@ jobs:
           sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           manager="$sdk/cmdline-tools/latest/bin/sdkmanager"
           yes | "$manager" --sdk_root="$sdk" --licenses >/dev/null || true
-          "$manager" --sdk_root="$sdk" "platforms;android-37" "platforms;android-37.2"
+          "$manager" --sdk_root="$sdk" "platforms;android-37.2"
 
       - name: Restore signing keystore
         env:
