@@ -123,7 +123,7 @@ fun SettingsView(
         TrackQuerySql.count(TrackQuery()),
     ).collectAsState(initial = 0)
     val storedBytes by db.trackDao().observeStoredBytes().collectAsState(initial = 0L)
-    var updateDialog by remember { mutableStateOf<DesktopUpdate.Result?>(null) }
+    var updateDialog by remember { mutableStateOf<DesktopUpdate.Available?>(null) }
     var checking by remember { mutableStateOf(false) }
     val syncHost = remember { SyncHost(db, settings) }
     DisposableEffect(syncHost) { onDispose { syncHost.stop() } }
@@ -689,8 +689,11 @@ fun SettingsView(
                             if (checking) return@ActionSettingRow
                             scope.launch {
                                 checking = true
-                                updateDialog = DesktopUpdate.check()
-                                if (updateDialog == null) status = "已是最新版本"
+                                when (val result = DesktopUpdate.check()) {
+                                    is DesktopUpdate.Check.Update -> updateDialog = result.release
+                                    DesktopUpdate.Check.Latest -> status = "已是最新版本"
+                                    DesktopUpdate.Check.Failed -> status = "检查更新失败，请稍后再试"
+                                }
                                 checking = false
                             }
                         },
