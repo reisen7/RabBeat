@@ -35,4 +35,26 @@ class DesktopUpdateTest {
     fun ignoresChecksumFiles() {
         assertNull(pickWindowsAsset(listOf("https://example.com/RabBeat-0.0.5.apk.sha256")))
     }
+
+    @Test
+    fun readsInstallerLocationFromRegistryDump() {
+        val locations = parseInstallLocations(
+            """
+            HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{abc}
+                DisplayName    REG_SZ    RabBeat
+                InstallLocation    REG_SZ    D:\soft\RabBeat\
+
+            End of search: 2 match(es) found.
+            """.trimIndent(),
+        )
+        assertEquals(listOf("D:\\soft\\RabBeat"), locations)
+    }
+
+    @Test
+    fun silentInstallWaitsForThisProcessThenRelaunches() {
+        val script = silentInstallScript(4060, "D:\\Temp\\RabBeat-setup.exe", "D:\\soft\\RabBeat\\RabBeat.exe")
+        assertTrue(script.contains("Get-Process -Id 4060"))
+        assertTrue(script.contains("'/quiet','/norestart'"))
+        assertTrue(script.contains("D:\\soft\\RabBeat\\RabBeat.exe"))
+    }
 }

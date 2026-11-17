@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.system.exitProcess
 import androidx.room.RoomRawQuery
 import com.rabbeat.app.data.local.RabBeatDatabase
 import com.rabbeat.app.data.local.clearScannedTracks
@@ -125,7 +127,13 @@ fun SettingsView(
     ).collectAsState(initial = 0)
     val storedBytes by db.trackDao().observeStoredBytes().collectAsState(initial = 0L)
     var updateDialog by remember { mutableStateOf<DesktopUpdate.Available?>(null) }
+    var updateProgress by remember { mutableStateOf<String?>(null) }
+    var updateHint by remember { mutableStateOf<String?>(null) }
+    var canReplaceInstall by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        canReplaceInstall = withContext(Dispatchers.IO) { DesktopUpdate.installedExe() != null }
+    }
     val syncHost = remember { SyncHost(db, settings) }
     DisposableEffect(syncHost) { onDispose { syncHost.stop() } }
     val syncRunning by syncHost.running.collectAsState()
@@ -812,32 +820,76 @@ fun SettingsView(
     }
 
     updateDialog?.let { rel ->
+        val replaceHere = canReplaceInstall && rel.assetUrl?.endsWith("-windows-setup.exe", true) == true
         AlertDialog(
-            onDismissRequest = { updateDialog = null },
+            onDismissRequest = { if (updateProgress == null) updateDialog = null },
             title = { Text("发现新版本 ${rel.tag}", fontWeight = FontWeight.SemiBold) },
             text = {
-                ReleaseNotes(
-                    rel.notes,
-                    Modifier
-                        .heightIn(max = 420.dp)
-                        .verticalScroll(rememberScrollState()),
-                )
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    ReleaseNotes(rel.notes)
+                    if (replaceHere) {
+                        Text(
+                            updateProgress ?: updateHint ?: "直接覆盖当前安装，完成后重新打开。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.secondaryLabel,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
             },
             confirmButton = {
                 Button(
+                    enabled = updateProgress == null,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accent.color,
                         contentColor = accent.onColor,
                     ),
                     modifier = Modifier.hand(),
                     onClick = {
-                        DesktopUpdate.browse(rel.assetUrl ?: rel.pageUrl)
-                        updateDialog = null
+                        val setupUrl = rel.assetUrl?.takeIf { replaceHere }
+                        if (setupUrl == null) {
+                            DesktopUpdate.browse(rel.assetUrl ?: rel.pageUrl)
+                            updateDialog = null
+                            return@Button
+                        }
+                        scope.launch {
+                            updateHint = null
+                            updateProgress = "正在下载…"
+                            val file = runCatching {
+                                DesktopUpdate.downloadInstaller(setupUrl) { read, total ->
+                                    updateProgress = if (total > 0) {
+                                        "正在下载 ${read * 100 / total}%"
+                                    } else {
+                                        "正在下载…"
+                                    }
+                                }
+                            }.getOrElse {
+                                DesktopLog.w("Update", "download failed: ${it.message}")
+                                updateProgress = null
+                                updateHint = "下载失败，请稍后再试"
+                                return@launch
+                            }
+                            val relaunch = withContext(Dispatchers.IO) { DesktopUpdate.installedExe() }
+                            if (relaunch == null) {
+                                DesktopUpdate.browse(setupUrl)
+                                updateProgress = null
+                                updateDialog = null
+                                return@launch
+                            }
+                            updateProgress = "正在安装，程序即将关闭"
+                            DesktopUpdate.launchInstalledUpdate(file, relaunch)
+                            player.shutdown()
+                            exitProcess(0)
+                        }
                     },
-                ) { Text(if (rel.assetUrl != null) "下载" else "查看") }
+                ) { Text(if (replaceHere) "更新" else if (rel.assetUrl != null) "下载" else "查看") }
             },
             dismissButton = {
-                TextButton(onClick = { updateDialog = null }, modifier = Modifier.hand()) { Text("取消") }
+                TextButton(
+                    enabled = updateProgress == null,
+                    onClick = { updateDialog = null },
+                    modifier = Modifier.hand(),
+                ) { Text("取消") }
             },
         )
     }

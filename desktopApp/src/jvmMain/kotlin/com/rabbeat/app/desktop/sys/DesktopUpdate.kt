@@ -5,10 +5,12 @@ import com.rabbeat.app.desktop.playlist.*
 import com.rabbeat.app.desktop.net.*
 
 import java.awt.Desktop
+import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.charset.Charset
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -91,6 +93,91 @@ object DesktopUpdate {
     fun browse(url: String) = runCatching {
         if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(URI(url))
     }
+
+    /** Packaged RabBeat.exe, whether it was installed or unzipped. */
+    fun packagedExe(): File? {
+        val path = ProcessHandle.current().info().command().orElse("")
+        val exe = File(path)
+        if (!exe.isFile || !exe.name.equals("RabBeat.exe", ignoreCase = true)) return null
+        val home = exe.parentFile ?: return null
+        val packaged = File(home, "app").isDirectory && File(home, "runtime").isDirectory
+        return if (packaged) exe else null
+    }
+
+    /**
+     * The running exe when it sits in the directory recorded by the installer.
+     * A portable unzip is not this, so an update does not create a second copy.
+     */
+    fun installedExe(): File? {
+        val exe = packagedExe() ?: return null
+        val home = exe.parentFile ?: return null
+        val installed = readInstallLocations().any { sameDirectory(home, File(it)) }
+        return if (installed) exe else null
+    }
+
+    suspend fun downloadInstaller(
+        url: String,
+        onProgress: (read: Long, total: Long) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        val response = http.send(
+            HttpRequest.newBuilder(URI(url))
+                .header("User-Agent", "RabBeat")
+                .header("Accept", "application/octet-stream")
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofInputStream(),
+        )
+        if (response.statusCode() !in 200..299) error("http ${response.statusCode()}")
+        val total = response.headers().firstValueAsLong("Content-Length").orElse(-1L)
+        val dest = File(System.getProperty("java.io.tmpdir"), "RabBeat-update-setup.exe")
+        response.body().use { input ->
+            dest.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var readTotal = 0L
+                var lastReport = 0L
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    output.write(buffer, 0, n)
+                    readTotal += n
+                    val now = System.currentTimeMillis()
+                    if (now - lastReport >= 200) {
+                        lastReport = now
+                        withContext(Dispatchers.Main) { onProgress(readTotal, total) }
+                    }
+                }
+                withContext(Dispatchers.Main) { onProgress(readTotal, if (total > 0) total else readTotal) }
+            }
+        }
+        dest
+    }
+
+    /**
+     * Starts a helper that waits until this process exits, then runs the
+     * installer with no directory page and opens the same RabBeat.exe again.
+     */
+    fun launchInstalledUpdate(installer: File, relaunch: File) {
+        val script = File(System.getProperty("java.io.tmpdir"), "rabbeat-update.ps1")
+        val text = silentInstallScript(
+            pid = ProcessHandle.current().pid(),
+            installer = installer.absolutePath,
+            relaunch = relaunch.absolutePath,
+        )
+        script.outputStream().use { out ->
+            out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+            out.write(text.toByteArray(Charsets.UTF_8))
+        }
+        ProcessBuilder(
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-WindowStyle", "Hidden",
+            "-File", script.absolutePath,
+        ).apply {
+            redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            redirectError(ProcessBuilder.Redirect.DISCARD)
+        }.start()
+    }
 }
 
 /** True when [tag] (like "v0.0.5") is a higher version than [current]. */
@@ -109,6 +196,41 @@ internal fun isNewerRelease(tag: String, current: String): Boolean {
     }
     return false
 }
+
+internal fun silentInstallScript(pid: Long, installer: String, relaunch: String): String {
+    fun quote(path: String) = path.replace("'", "''")
+    return $$"""
+        $ErrorActionPreference = 'SilentlyContinue'
+        while (Get-Process -Id $$pid -ErrorAction SilentlyContinue) { Start-Sleep -Seconds 1 }
+        Start-Process -FilePath '$${quote(installer)}' -ArgumentList '/quiet','/norestart' -Wait
+        Start-Process -FilePath '$${quote(relaunch)}'
+        Remove-Item -LiteralPath $PSCommandPath -Force
+    """.trimIndent()
+}
+
+internal fun parseInstallLocations(regOutput: String): List<String> =
+    Regex("""(?m)^\s*InstallLocation\s+REG_SZ\s+(.+?)\s*$""")
+        .findAll(regOutput)
+        .map { it.groupValues[1].trim().trimEnd('\\', '/') }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .toList()
+
+private fun readInstallLocations(): List<String> = runCatching {
+    val proc = ProcessBuilder(
+        "reg", "query",
+        "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        "/f", "RabBeat",
+        "/s",
+    ).redirectErrorStream(true).start()
+    val text = proc.inputStream.bufferedReader(Charset.defaultCharset()).readText()
+    if (!proc.waitFor(8, java.util.concurrent.TimeUnit.SECONDS)) proc.destroyForcibly()
+    parseInstallLocations(text)
+}.getOrDefault(emptyList())
+
+private fun sameDirectory(a: File, b: File): Boolean = runCatching {
+    a.canonicalFile == b.canonicalFile
+}.getOrDefault(false)
 
 internal fun pickWindowsAsset(urls: List<String>): String? =
     urls.firstOrNull { it.endsWith("-windows-setup.exe", ignoreCase = true) }
