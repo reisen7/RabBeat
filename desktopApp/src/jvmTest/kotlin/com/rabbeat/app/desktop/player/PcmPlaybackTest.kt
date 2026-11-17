@@ -1,6 +1,8 @@
 package com.rabbeat.app.desktop.player
 
 import java.io.ByteArrayInputStream
+import java.io.IOException
+import java.io.InputStream
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import kotlin.test.Test
@@ -44,5 +46,18 @@ class PcmPlaybackTest {
         val read = ByteArray(4)
         assertEquals(4, out.read(read))
         assertTrue(read.contentEquals(byteArrayOf(0x34, 0x12, 0x34, 0x12)))
+    }
+
+    @Test
+    fun discardFallsBackWhenSkipThrows() {
+        val src = object : InputStream() {
+            private val data = byteArrayOf(1, 2, 3, 4, 5, 6)
+            private var pos = 0
+            override fun read(): Int = if (pos >= data.size) -1 else data[pos++].toInt() and 0xff
+            override fun skip(n: Long): Long = throw IOException("skip not supported")
+        }
+        assertEquals(0L, discardBytes(src, 4))
+        assertEquals(5, src.read())
+        assertEquals(6, src.read())
     }
 }

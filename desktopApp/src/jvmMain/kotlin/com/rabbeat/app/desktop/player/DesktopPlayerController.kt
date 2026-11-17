@@ -482,14 +482,8 @@ class DesktopPlayerController(
         return runCatching {
             val source = resolveSource(track)
             val raw = AudioSystem.getAudioInputStream(source)
-            var left = 256L * 1024
-            var skippedTotal = 0L
-            while (left > 0) {
-                val skipped = raw.skip(left)
-                if (skipped <= 0) break
-                left -= skipped
-                skippedTotal += skipped
-            }
+            val want = 256L * 1024
+            val skippedTotal = want - discardBytes(raw, want)
             DesktopLog.w("Player", "resync \"${track.title}\" pos=${pos}ms skipped=$skippedTotal file=${source.length()}")
             toPlaybackPcm(raw)
         }.getOrElse {
@@ -878,51 +872,16 @@ class DesktopPlayerController(
         return source.length() < expected * 85 / 100
     }
 
-    private fun skipRaw(input: InputStream, bytes: Long): Boolean {
-        var remaining = bytes
-        val buf = ByteArray(8192)
-        while (remaining > 0) {
-            val skipped = input.skip(remaining)
-            if (skipped > 0) {
-                remaining -= skipped
-                continue
-            }
-            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
-            if (n <= 0) return false
-            remaining -= n
-        }
-        return true
-    }
+    private fun skipRaw(input: InputStream, bytes: Long): Boolean = discardBytes(input, bytes) == 0L
 
     /** Discard already-decoded PCM. Used when an MP3 frame walk could not position the file. */
     private fun skipByDecoding(input: AudioInputStream, bytes: Long) {
-        var remaining = bytes
-        val buf = ByteArray(64 * 1024)
-        while (remaining > 0) {
-            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
-            if (n <= 0) {
-                DesktopLog.w("Player", "seek decode short by ${remaining}B of $bytes")
-                return
-            }
-            remaining -= n
-        }
+        val left = discardBytes(input, bytes)
+        if (left > 0) DesktopLog.w("Player", "seek decode short by ${left}B of $bytes")
     }
 
     private fun skipFully(input: AudioInputStream, bytes: Long) {
-        var remaining = bytes
-        val buf = ByteArray(8192)
-        while (remaining > 0) {
-            val skipped = input.skip(remaining)
-            if (skipped > 0) {
-                remaining -= skipped
-                continue
-            }
-            // Decoded streams (mp3spi/jflac/vorbisspi) often report skip() == 0;
-            // fall back to decoding and discarding so we never spin forever.
-            val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
-            if (n <= 0) return
-            remaining -= n
-        }
+        discardBytes(input, bytes)
     }
 
     @Serializable

@@ -1,5 +1,6 @@
 package com.rabbeat.app.desktop.player
 
+import java.io.IOException
 import java.io.InputStream
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
@@ -18,16 +19,46 @@ internal fun playbackLineFormat(source: AudioFormat): AudioFormat {
     )
 }
 
-internal fun toPlaybackPcm(raw: AudioInputStream): AudioInputStream {
-    val decoded = if (isLinearPcm(raw.format)) {
-        raw
-    } else {
-        AudioSystem.getAudioInputStream(AudioFormat.Encoding.PCM_SIGNED, raw)
+/**
+ * Drops [bytes] from [input]. jflac's decoded stream throws "skip not supported"
+ * instead of returning 0, which used to abort resume-from-position.
+ * Returns how many bytes could not be dropped.
+ */
+internal fun discardBytes(input: InputStream, bytes: Long): Long {
+    var remaining = bytes
+    val buf = ByteArray(64 * 1024)
+    while (remaining > 0) {
+        val skipped = try {
+            input.skip(remaining)
+        } catch (_: IOException) {
+            0L
+        }
+        if (skipped > 0) {
+            remaining -= skipped
+            continue
+        }
+        val n = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
+        if (n <= 0) return remaining
+        remaining -= n
     }
-    val target = playbackLineFormat(decoded.format)
-    if (decoded.format.matches(target)) return decoded
-    return runCatching { AudioSystem.getAudioInputStream(target, decoded) }
-        .getOrElse { Pcm16StereoStream(decoded, target) }
+    return 0L
+}
+
+internal fun toPlaybackPcm(raw: AudioInputStream): AudioInputStream {
+    // mp3spi only converts to a fully specified PCM format. Asking for the
+    // PCM_SIGNED encoding alone throws "Unsupported conversion: PCM_SIGNED from MPEG…".
+    // The rate stays the file's own rate: Java Sound cannot resample.
+    val target = playbackLineFormat(raw.format)
+    val decoded = when {
+        raw.format.matches(target) -> raw
+        else -> runCatching { AudioSystem.getAudioInputStream(target, raw) }.getOrNull()
+            ?: runCatching { AudioSystem.getAudioInputStream(AudioFormat.Encoding.PCM_SIGNED, raw) }.getOrNull()
+            ?: raw
+    }
+    val line = playbackLineFormat(decoded.format)
+    if (decoded.format.matches(line)) return decoded
+    return runCatching { AudioSystem.getAudioInputStream(line, decoded) }
+        .getOrElse { Pcm16StereoStream(decoded, line) }
 }
 
 private fun isLinearPcm(format: AudioFormat): Boolean {
