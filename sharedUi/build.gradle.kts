@@ -14,7 +14,11 @@ compose.resources {
 kotlin {
     android {
         namespace = "com.rabbeat.app.sharedui"
-        compileSdk = 36
+        compileSdk {
+            version = release(37) {
+                minorApiLevel = 2
+            }
+        }
         minSdk = 26
         // Off by default on a KMP library. Without it the compose string
         // table never lands in the APK, and the mini player crashes on open.

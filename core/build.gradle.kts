@@ -13,7 +13,11 @@ room {
 kotlin {
     android {
         namespace = "com.rabbeat.app.core"
-        compileSdk = 36
+        compileSdk {
+            version = release(37) {
+                minorApiLevel = 2
+            }
+        }
         minSdk = 26
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
