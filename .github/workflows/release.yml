@@ -174,14 +174,15 @@ jobs:
             $archive.Dispose()
           }
           if ($names -notcontains "RabBeat.exe") { throw "RabBeat.exe is missing from $($zip.Name)" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $zip.FullName (Join-Path dist $zip.Name)
+          Copy-Item $setup.FullName (Join-Path dist $setup.Name)
 
       - name: Upload Windows packages
         uses: actions/upload-artifact@v4
         with:
           name: windows-packages
-          path: |
-            desktopApp/build/compose/binaries/main/portable/*-windows-portable.zip
-            desktopApp/build/compose/binaries/main/exe/*-windows-setup.exe
+          path: dist/*
           if-no-files-found: error
 
   publish:
@@ -241,6 +242,7 @@ jobs:
         run: |
           cd dist
           for f in *; do
+            [ -f "$f" ] || continue
             case "$f" in
               *.sha256) continue ;;
             esac

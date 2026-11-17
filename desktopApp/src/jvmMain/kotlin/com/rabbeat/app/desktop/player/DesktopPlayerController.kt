@@ -22,7 +22,6 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.FloatControl
@@ -42,8 +41,8 @@ import kotlinx.serialization.json.Json
 
 /**
  * javax.sound-based [PlaybackController] for the desktop app. Decoded audio
- * always goes through a common PCM_SIGNED 44.1kHz/16-bit/stereo line, so
- * seeking is frame-accurate regardless of the source format. Encrypted
+ * is 16-bit signed little-endian stereo at the file's own sample rate.
+ * Java Sound cannot resample, so a 48 kHz file stays 48 kHz. Encrypted
  * ncm/QMC-family files are decrypted through the shared core decoders first.
  */
 class DesktopPlayerController(
@@ -492,10 +491,7 @@ class DesktopPlayerController(
                 skippedTotal += skipped
             }
             DesktopLog.w("Player", "resync \"${track.title}\" pos=${pos}ms skipped=$skippedTotal file=${source.length()}")
-            val pcm = AudioFormat(
-                AudioFormat.Encoding.PCM_SIGNED, 44100f, 16, 2, 4, 44100f, false,
-            )
-            AudioSystem.getAudioInputStream(pcm, raw)
+            toPlaybackPcm(raw)
         }.getOrElse {
             DesktopLog.e("Player", "resync failed \"${track.title}\" pos=${pos}ms ${it.brief()}")
             null
@@ -579,11 +575,8 @@ class DesktopPlayerController(
                 null
             }
             val raw = positioned ?: AudioSystem.getAudioInputStream(source)
-            val pcm = AudioFormat(
-                AudioFormat.Encoding.PCM_SIGNED,
-                44100f, 16, 2, 4, 44100f, false,
-            )
-            val decoded = AudioSystem.getAudioInputStream(pcm, raw)
+            val decoded = toPlaybackPcm(raw)
+            val pcm = decoded.format
             DesktopLog.i("Player", "decoded \"${track.title}\" format=${decoded.format} frames=${decoded.frameLength}")
             if (seekMs > 0L && positioned == null) {
                 val pcmBytes = (seekMs / 1000.0 * pcm.frameRate).toLong() * pcm.frameSize
@@ -705,7 +698,8 @@ class DesktopPlayerController(
             }
             zeroReads = 0
             bytes += n
-            val audioSec = basePositionMs / 1000L + bytes / 176_400L
+            val bytesPerSec = (l.format.frameRate * l.format.frameSize).toLong().coerceAtLeast(1L)
+            val audioSec = basePositionMs / 1000L + bytes / bytesPerSec
             if (audioSec >= nextMarkSec) {
                 DesktopLog.i("Player", "pos \"${track.title}\" audio=${audioSec}s line=${currentPositionMs()}ms bytes=$bytes")
                 nextMarkSec = audioSec + 15L
@@ -786,7 +780,8 @@ class DesktopPlayerController(
 
     private fun currentPositionMs(): Long {
         val l = line ?: return _state.value.positionMs
-        return basePositionMs + (l.longFramePosition * 1000L / 44100L)
+        val rate = l.format.sampleRate.toLong().coerceAtLeast(1L)
+        return basePositionMs + (l.longFramePosition * 1000L / rate)
     }
 
     @Volatile private var fadeFactor = 1f
